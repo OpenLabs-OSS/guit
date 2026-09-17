@@ -1,0 +1,8 @@
+# Keep line endings deterministic across platforms: sources are LF in the
+# repository and in working copies, so diffs never churn on checkout.
+*.cpp text eol=lf
+*.h text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
