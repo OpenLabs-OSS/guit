@@ -31,7 +31,15 @@ struct FileStatusEntry
     FileState stagedState = FileState::Unmodified;
     FileState worktreeState = FileState::Unmodified;
 
-    [[nodiscard]] bool isStaged() const { return stagedState != FileState::Unmodified; }
+    [[nodiscard]] bool isStaged() const
+    {
+        // Only states that actually place content in the index count as
+        // staged. Untracked files are NOT staged (they are invisible to Git
+        // until added); conflicts are reported via isConflicted().
+        return stagedState == FileState::Modified || stagedState == FileState::Added
+            || stagedState == FileState::Deleted || stagedState == FileState::Renamed
+            || stagedState == FileState::Copied;
+    }
     [[nodiscard]] bool isUnstaged() const { return worktreeState != FileState::Unmodified; }
     [[nodiscard]] bool isConflicted() const
     {

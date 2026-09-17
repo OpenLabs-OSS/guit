@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DiffInfo.h"
+
 #include <QDateTime>
 #include <QList>
 #include <QString>
@@ -49,6 +51,35 @@ struct BranchInfo
 
     static QString forEachRefFormat();
     static QList<BranchInfo> parseForEachRef(const QString &output);
+};
+
+// One file touched by a commit, from `git diff-tree --name-status`.
+struct ChangedFile
+{
+    QString path;
+    QString oldPath;  // set for renames
+    QString status;   // M, A, D, R, C, T, ...
+};
+
+// Full details for the commit-details view: the commit itself, the files
+// it touched, and its diff.
+struct CommitDetails
+{
+    CommitInfo info;
+    bool valid = false;
+    QString errorMessage;
+    QList<ChangedFile> files;
+    QList<FileDiff> diffs;
+
+    static QList<ChangedFile> parseNameStatus(const QString &output);
+};
+
+// How many commits `to` is ahead of / behind `from`.
+struct AheadBehind
+{
+    int ahead = 0;
+    int behind = 0;
+    bool valid = false;
 };
 
 } // namespace Guit

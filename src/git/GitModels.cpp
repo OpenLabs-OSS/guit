@@ -38,6 +38,31 @@ QList<CommitInfo> CommitInfo::parseLog(const QString &output)
     return commits;
 }
 
+QList<ChangedFile> CommitDetails::parseNameStatus(const QString &output)
+{
+    QList<ChangedFile> files;
+    const QStringList lines = output.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
+        const int tab = line.indexOf(QLatin1Char('\t'));
+        if (tab <= 0)
+            continue;
+        ChangedFile file;
+        file.status = line.left(tab).trimmed();
+        QString paths = line.mid(tab + 1);
+        if ((file.status.startsWith(QLatin1Char('R')) || file.status.startsWith(QLatin1Char('C')))
+            && paths.contains(QLatin1Char('\t'))) {
+            const int secondTab = paths.indexOf(QLatin1Char('\t'));
+            file.oldPath = paths.left(secondTab);
+            file.path = paths.mid(secondTab + 1);
+        } else {
+            file.path = paths;
+        }
+        if (!file.path.isEmpty())
+            files.append(file);
+    }
+    return files;
+}
+
 QString BranchInfo::forEachRefFormat()
 {
     // NOTE: unlike `git log --format` (which uses %xNN escapes),
