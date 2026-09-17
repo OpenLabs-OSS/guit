@@ -32,11 +32,18 @@ public:
     {
         QVERIFY2(dir.isValid(), "Failed to create temporary directory");
         runOrFail({QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")});
+        // Repo-local identity: Guit itself never invents an author, but the
+        // test suite needs commits to succeed on machines without Git
+        // user configuration.
+        runOrFail({QStringLiteral("config"), QStringLiteral("user.name"), QStringLiteral("Guit Test")});
+        runOrFail({QStringLiteral("config"), QStringLiteral("user.email"), QStringLiteral("guit-test@example.com")});
     }
 
     [[nodiscard]] QString path() const { return dir.path(); }
 
-    void runOrFail(const QStringList &args)
+    // Runs git, returning the exit code. Use for operations that are
+    // *expected* to fail (merge conflicts, ...).
+    int runRaw(const QStringList &args)
     {
         QProcess git;
         git.setProgram(testGitExecutable());
@@ -54,11 +61,17 @@ public:
         env.insert(QStringLiteral("GIT_COMMITTER_DATE"), QStringLiteral("2024-01-02T03:04:05+00:00"));
         git.setProcessEnvironment(env);
         git.start();
-        QVERIFY2(git.waitForStarted(), qPrintable(QStringLiteral("git failed to start: ") + git.errorString()));
-        QVERIFY2(git.waitForFinished(30000), "git timed out in test fixture");
-        QVERIFY2(git.exitCode() == 0,
-                 qPrintable(QStringLiteral("git %1 failed: %2").arg(args.join(QLatin1Char(' ')),
-                                                                   QString::fromUtf8(git.readAllStandardError()))));
+        if (!git.waitForStarted())
+            return -100;
+        if (!git.waitForFinished(30000))
+            return -101;
+        return git.exitCode();
+    }
+
+    void runOrFail(const QStringList &args)
+    {
+        const int exitCode = runRaw(args);
+        QVERIFY2(exitCode == 0, qPrintable(QStringLiteral("git %1 exited with %2").arg(args.join(QLatin1Char(' '))).arg(exitCode)));
     }
 
     void writeFile(const QString &relativePath, const QString &content)
