@@ -1,5 +1,8 @@
 #include "../app/AppSettings.h"
 #include "../app/ThemeManager.h"
+#include "../controllers/BranchController.h"
+#include "../controllers/ChangesController.h"
+#include "../controllers/HistoryController.h"
 #include "../controllers/RepositoryController.h"
 #include "../git/GitRepository.h"
 #include "../ui/MainWindow.h"
@@ -38,7 +41,10 @@ int main(int argc, char *argv[])
     }
 
     Guit::RepositoryController controller(&repository, &settings);
-    Guit::MainWindow window(&controller, &settings, &themes);
+    Guit::ChangesController changes(&repository);
+    Guit::HistoryController history(&repository);
+    Guit::BranchController branches(&repository);
+    Guit::MainWindow window(&controller, &changes, &history, &branches, &settings, &themes);
     window.show();
 
     // Optional: `guit <path>` opens a repository on startup.

@@ -1,8 +1,8 @@
 #include "MainWindow.h"
 
+#include "CloneDialog.h"
 #include "PlaceholderPage.h"
 #include "../app/AppSettings.h"
-#include "../app/ThemeManager.h"
 #include "../controllers/RepositoryController.h"
 
 #include <QAction>
@@ -10,22 +10,36 @@
 #include <QCloseEvent>
 #include <QDir>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QProgressDialog>
 #include <QSplitter>
 #include <QStatusBar>
 
 namespace Guit
 {
 
-MainWindow::MainWindow(RepositoryController *controller, AppSettings *settings, ThemeManager *themes, QWidget *parent)
+MainWindow::MainWindow(RepositoryController *controller,
+                       ChangesController *changes,
+                       HistoryController *history,
+                       BranchController *branches,
+                       AppSettings *settings,
+                       ThemeManager *themes,
+                       QWidget *parent)
     : QMainWindow(parent)
     , m_controller(controller)
+    , m_changes(changes)
+    , m_history(history)
+    , m_branches(branches)
     , m_settings(settings)
     , m_themes(themes)
     , m_sidebar(new Sidebar(this))
     , m_stack(new QStackedWidget(this))
     , m_overview(new OverviewPage(this))
+    , m_changesPage(new ChangesPage(changes, this))
+    , m_historyPage(new HistoryPage(history, this))
+    , m_branchesPage(new BranchesPage(branches, this))
 {
     setWindowTitle(tr("Guit"));
     resize(1100, 700);
@@ -33,19 +47,11 @@ MainWindow::MainWindow(RepositoryController *controller, AppSettings *settings, 
     if (!m_settings->windowGeometry().isEmpty())
         restoreGeometry(m_settings->windowGeometry());
 
-    m_stack->addWidget(m_overview); // index 0 == Sidebar::Page::Overview
-    m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::Changes),
-                                           Sidebar::pageExplanation(Sidebar::Page::Changes),
-                                           QStringLiteral("git status --porcelain=v1"),
-                                           tr("Staging workflow arrives in Milestone 2."), this));
-    m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::History),
-                                           Sidebar::pageExplanation(Sidebar::Page::History),
-                                           QStringLiteral("git log --format=..."),
-                                           tr("Commit history arrives in Milestone 2."), this));
-    m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::Branches),
-                                           Sidebar::pageExplanation(Sidebar::Page::Branches),
-                                           QStringLiteral("git for-each-ref refs/heads refs/remotes"),
-                                           tr("Branch management arrives in Milestone 2."), this));
+    // Stack order matches Sidebar::Page values.
+    m_stack->addWidget(m_overview);
+    m_stack->addWidget(m_changesPage);
+    m_stack->addWidget(m_historyPage);
+    m_stack->addWidget(m_branchesPage);
     m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::Tags),
                                            Sidebar::pageExplanation(Sidebar::Page::Tags),
                                            QStringLiteral("git tag --list"),
@@ -77,6 +83,32 @@ MainWindow::MainWindow(RepositoryController *controller, AppSettings *settings, 
     connect(m_controller, &RepositoryController::repositoryClosed, this, &MainWindow::onRepositoryClosed);
     connect(m_controller, &RepositoryController::openFailed, this, &MainWindow::onOpenFailed);
     connect(m_controller, &RepositoryController::recentRepositoriesChanged, this, &MainWindow::onRecentChanged);
+    connect(m_controller, &RepositoryController::notice, this, &MainWindow::showNotice);
+    connect(m_controller, &RepositoryController::cloneProgress, this, &MainWindow::onCloneProgress);
+    connect(m_controller, &RepositoryController::cloneFinished, this, &MainWindow::onCloneFinished);
+    connect(m_controller, &RepositoryController::cloneFailed, this, &MainWindow::onCloneFailed);
+
+    // Operation feedback: status-bar notices for success, error boxes with
+    // Git details for failures. Branch errors are displayed by BranchesPage
+    // itself (it may offer force-delete), so they are not duplicated here.
+    connect(m_changes, &ChangesController::staged, this,
+            [this](const QString &message, const QString &) { showNotice(message); });
+    connect(m_changes, &ChangesController::committed, this,
+            [this](const QString &message, const QString &, const QString &) { showNotice(message); });
+    connect(m_changes, &ChangesController::operationFailed, this,
+            [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
+    connect(m_changes, &ChangesController::headChanged, this, [this]() {
+        refreshOverview();
+        updateStatusBar();
+    });
+    connect(m_history, &HistoryController::operationFailed, this,
+            [this](const QString &reason, const QString &details) { showError(reason, details); });
+    connect(m_branches, &BranchController::branchOperationDone, this,
+            [this](const QString &message, const QString &) { showNotice(message); });
+    connect(m_branches, &BranchController::headChanged, this, [this]() {
+        refreshOverview();
+        updateStatusBar();
+    });
 
     refreshOverview();
     updateStatusBar();
@@ -94,9 +126,21 @@ void MainWindow::buildMenus()
 
     m_recentMenu = fileMenu->addMenu(tr("Open &Recent"));
 
+    auto *cloneAction = new QAction(tr("&Clone Repository…"), this);
+    connect(cloneAction, &QAction::triggered, this, &MainWindow::onCloneRepository);
+    fileMenu->addAction(cloneAction);
+
+    auto *initAction = new QAction(tr("&Initialize Repository…"), this);
+    connect(initAction, &QAction::triggered, this, &MainWindow::onInitRepository);
+    fileMenu->addAction(initAction);
+
+    auto *closeAction = new QAction(tr("&Close Repository"), this);
+    connect(closeAction, &QAction::triggered, this, &MainWindow::onCloseRepository);
+    fileMenu->addAction(closeAction);
+
     auto *refreshAction = new QAction(tr("&Refresh"), this);
     refreshAction->setShortcut(QKeySequence::Refresh);
-    connect(refreshAction, &QAction::triggered, m_controller, &RepositoryController::refresh);
+    connect(refreshAction, &QAction::triggered, this, &MainWindow::refreshCurrentPage);
     fileMenu->addAction(refreshAction);
 
     fileMenu->addSeparator();
@@ -149,6 +193,35 @@ void MainWindow::onOpenRepository()
         m_controller->openRepository(dir);
 }
 
+void MainWindow::onCloneRepository()
+{
+    CloneDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_cloneProgress = new QProgressDialog(tr("Cloning…"), tr("Cancel"), 0, 0, this);
+    m_cloneProgress->setWindowTitle(tr("Clone Repository"));
+    m_cloneProgress->setWindowModality(Qt::WindowModal);
+    m_cloneProgress->setMinimumDuration(0);
+    connect(m_cloneProgress, &QProgressDialog::canceled, m_controller, &RepositoryController::cancelClone);
+    m_cloneProgress->show();
+    m_controller->cloneRepository(dialog.sourceUrl(), dialog.targetDirectory());
+}
+
+void MainWindow::onInitRepository()
+{
+    const QString dir = QFileDialog::getExistingDirectory(this, tr("Choose Directory to Initialize"));
+    if (dir.isEmpty())
+        return;
+    const QString branch = QInputDialog::getText(this, tr("Initialize Repository"),
+                                                 tr("Initial branch name (empty for Git default):"));
+    m_controller->initRepository(dir, branch);
+}
+
+void MainWindow::onCloseRepository()
+{
+    m_controller->closeRepository();
+}
+
 void MainWindow::onOpenRecent(const QString &path)
 {
     if (QDir(path).exists()) {
@@ -164,17 +237,47 @@ void MainWindow::onRepositoryOpened(const QString &rootPath)
     statusBar()->showMessage(tr("Opened %1").arg(rootPath), 5000);
     refreshOverview();
     updateStatusBar();
+    refreshCurrentPage();
 }
 
 void MainWindow::onRepositoryClosed()
 {
     refreshOverview();
     updateStatusBar();
+    refreshCurrentPage();
 }
 
 void MainWindow::onOpenFailed(const QString &reason, const QString &details)
 {
     showError(reason, details);
+}
+
+void MainWindow::onCloneProgress(const QString &text)
+{
+    if (m_cloneProgress != nullptr)
+        m_cloneProgress->setLabelText(text.trimmed().split(QLatin1Char('\n'), Qt::SkipEmptyParts).constLast());
+}
+
+void MainWindow::onCloneFinished(const QString &directory, const QString &command)
+{
+    if (m_cloneProgress != nullptr) {
+        m_cloneProgress->close();
+        m_cloneProgress->deleteLater();
+        m_cloneProgress = nullptr;
+    }
+    statusBar()->showMessage(tr("Cloned into %1").arg(directory), 8000);
+    Q_UNUSED(command);
+}
+
+void MainWindow::onCloneFailed(const QString &reason, const QString &details, const QString &command)
+{
+    if (m_cloneProgress != nullptr) {
+        m_cloneProgress->close();
+        m_cloneProgress->deleteLater();
+        m_cloneProgress = nullptr;
+    }
+    const QString fullDetails = details.isEmpty() ? command : details + QStringLiteral("\n") + command;
+    showError(reason, fullDetails);
 }
 
 void MainWindow::onRecentChanged()
@@ -199,6 +302,34 @@ void MainWindow::onRecentChanged()
 void MainWindow::onPageSelected(Sidebar::Page page)
 {
     m_stack->setCurrentIndex(static_cast<int>(page));
+    refreshCurrentPage();
+}
+
+void MainWindow::refreshCurrentPage()
+{
+    if (m_controller->repository()->isValid()) {
+        switch (m_sidebar->currentPage()) {
+        case Sidebar::Page::Changes:
+            m_changesPage->refresh();
+            break;
+        case Sidebar::Page::History:
+            m_historyPage->refresh();
+            break;
+        case Sidebar::Page::Branches:
+            m_branchesPage->refresh();
+            break;
+        case Sidebar::Page::Overview:
+            refreshOverview();
+            break;
+        case Sidebar::Page::Tags:
+        case Sidebar::Page::Stashes:
+        case Sidebar::Page::Remotes:
+            break;
+        }
+    } else {
+        refreshOverview();
+    }
+    updateStatusBar();
 }
 
 void MainWindow::onThemeAction(ThemeManager::Theme theme)
@@ -209,7 +340,7 @@ void MainWindow::onThemeAction(ThemeManager::Theme theme)
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, tr("About Guit"),
-                       tr("Guit — a beginner-friendly Git client that shows what Git is doing.\n\nMilestone 1 foundation build."));
+                       tr("Guit — a beginner-friendly Git client that shows what Git is doing.\n\nMilestone 2 build: core Git workflows."));
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -276,6 +407,11 @@ void MainWindow::showError(const QString &reason, const QString &details)
     if (!details.isEmpty())
         message.setDetailedText(details);
     message.exec();
+}
+
+void MainWindow::showNotice(const QString &message)
+{
+    statusBar()->showMessage(message, 8000);
 }
 
 } // namespace Guit

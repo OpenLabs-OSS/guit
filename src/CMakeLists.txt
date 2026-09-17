@@ -15,6 +15,8 @@ add_library(guit_core STATIC
     git/FileStatus.cpp
     git/GitModels.h
     git/GitModels.cpp
+    git/DiffInfo.h
+    git/DiffInfo.cpp
     utils/GitCommandFormatter.h
     utils/GitCommandFormatter.cpp
     utils/Logger.h
@@ -25,8 +27,26 @@ add_library(guit_core STATIC
     app/ThemeManager.cpp
     controllers/RepositoryController.h
     controllers/RepositoryController.cpp
+    controllers/ChangesController.h
+    controllers/ChangesController.cpp
+    controllers/HistoryController.h
+    controllers/HistoryController.cpp
+    controllers/BranchController.h
+    controllers/BranchController.cpp
     ui/Sidebar.h
     ui/Sidebar.cpp
+    ui/DiffViewer.h
+    ui/DiffViewer.cpp
+    ui/ChangesPage.h
+    ui/ChangesPage.cpp
+    ui/HistoryPage.h
+    ui/HistoryPage.cpp
+    ui/BranchesPage.h
+    ui/BranchesPage.cpp
+    ui/BranchDialog.h
+    ui/BranchDialog.cpp
+    ui/CloneDialog.h
+    ui/CloneDialog.cpp
     ui/OverviewPage.h
     ui/OverviewPage.cpp
     ui/PlaceholderPage.h
