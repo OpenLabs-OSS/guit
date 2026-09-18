@@ -3,9 +3,11 @@
 #include "GitProcess.h"
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QLoggingCategory>
 #include <QRegularExpression>
+#include <QStandardPaths>
 
 Q_LOGGING_CATEGORY(guitRepoLog, "guit.git.repository")
 
@@ -620,6 +622,7 @@ void GitRepository::startNetwork(const QStringList &args, const QString &success
     // Git handles authentication itself via credential helpers; Guit never
     // sees passwords or tokens. Progress goes to stderr (--progress).
     m_network->start(m_client->gitExecutable(), args, m_rootPath, 30 * 60 * 1000);
+    emit networkStarted(m_networkCommand);
 }
 
 void GitRepository::startFetch(const QString &remote, bool prune)
@@ -1144,6 +1147,318 @@ OperationResult GitRepository::resolveWithTheirs(const QString &path)
     // Show the resolution command, not the bookkeeping `git add`.
     result.command = m_client->equivalentCommand(takeArgs);
     return result;
+}
+
+// --- Milestone 4: graph + search --------------------------------------------------
+
+QList<CommitInfo> GitRepository::logAll(int maxCount) const
+{
+    if (!m_valid || maxCount <= 0)
+        return {};
+    const GitProcessResult result = m_client->run(
+        {QStringLiteral("log"), QStringLiteral("--all"), QStringLiteral("--topo-order"),
+         QStringLiteral("--format=") + CommitInfo::logFormat(),
+         QStringLiteral("--max-count=") + QString::number(maxCount)},
+        m_rootPath);
+    if (!result.isSuccess())
+        return {};
+    return CommitInfo::parseLog(result.standardOutput);
+}
+
+QMap<QString, QStringList> GitRepository::refsByHash() const
+{
+    QMap<QString, QStringList> refs;
+    if (!m_valid)
+        return refs;
+    // Peeled object first so annotated tags map to their commit.
+    const GitProcessResult result = m_client->run(
+        {QStringLiteral("for-each-ref"), QStringLiteral("--format=%(*objectname)%1f%(objectname)%1f%(refname:short)"),
+         QStringLiteral("refs/heads"), QStringLiteral("refs/remotes"), QStringLiteral("refs/tags")},
+        m_rootPath);
+    if (!result.isSuccess())
+        return refs;
+    const QStringList lines = result.standardOutput.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
+        const QStringList fields = line.split(QChar(0x1F), Qt::KeepEmptyParts);
+        if (fields.size() < 3)
+            continue;
+        const QString hash = !fields.at(0).trimmed().isEmpty() ? fields.at(0).trimmed() : fields.at(1).trimmed();
+        const QString name = fields.at(2).trimmed();
+        if (!hash.isEmpty() && !name.isEmpty())
+            refs[hash].append(name);
+    }
+    return refs;
+}
+
+QList<CommitInfo> GitRepository::searchCommits(const QString &query, int maxCount) const
+{
+    const QString needle = query.trimmed();
+    if (!m_valid || needle.isEmpty())
+        return {};
+    QList<CommitInfo> matches;
+    for (const CommitInfo &commit : logAll(maxCount)) {
+        if (commit.subject.contains(needle, Qt::CaseInsensitive)
+            || commit.body.contains(needle, Qt::CaseInsensitive)
+            || commit.authorName.contains(needle, Qt::CaseInsensitive)
+            || commit.hash.startsWith(needle, Qt::CaseInsensitive))
+            matches.append(commit);
+    }
+    return matches;
+}
+
+// --- Milestone 4: reflog ----------------------------------------------------------
+
+QList<ReflogEntry> GitRepository::reflog(int maxCount) const
+{
+    if (!m_valid || maxCount <= 0)
+        return {};
+    const GitProcessResult result = m_client->run(
+        {QStringLiteral("reflog"), QStringLiteral("--format=") + ReflogEntry::logFormat(),
+         QStringLiteral("-n"), QString::number(maxCount)},
+        m_rootPath);
+    if (!result.isSuccess())
+        return {};
+    return ReflogEntry::parse(result.standardOutput);
+}
+
+// --- Milestone 4: LFS / submodules / worktrees ---------------------------------------
+
+namespace
+{
+QString findLfsExecutable()
+{
+    return QStandardPaths::findExecutable(QStringLiteral("git-lfs"));
+}
+} // namespace
+
+LfsInfo GitRepository::lfsInfo() const
+{
+    LfsInfo info;
+    const QString lfs = findLfsExecutable();
+    if (lfs.isEmpty())
+        return info;
+    const GitProcessResult version = GitProcess::run(lfs, {QStringLiteral("version")}, {}, 15000);
+    info.available = version.isSuccess();
+    if (info.available)
+        info.version = version.standardOutput.trimmed().split(QLatin1Char('\n')).constFirst().trimmed();
+    if (!m_valid)
+        return info;
+    // The repo routes files through LFS when .gitattributes says so.
+    QFile attributes(QDir(m_rootPath).filePath(QStringLiteral(".gitattributes")));
+    if (attributes.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        const QString content = QString::fromUtf8(attributes.readAll());
+        info.enabledInRepo = content.contains(QStringLiteral("filter=lfs"));
+    }
+    if (info.enabledInRepo) {
+        const GitProcessResult files = GitProcess::run(lfs, {QStringLiteral("ls-files")}, m_rootPath, 30000);
+        if (files.isSuccess())
+            info.trackedFiles = files.standardOutput.split(QLatin1Char('\n'), Qt::SkipEmptyParts).size();
+    }
+    return info;
+}
+
+OperationResult GitRepository::lfsTrack(const QString &pattern)
+{
+    const QString trimmed = pattern.trimmed();
+    if (!m_valid)
+        return failureResult(tr("No repository is open."));
+    if (trimmed.isEmpty())
+        return failureResult(tr("Enter a file pattern, e.g. *.psd."));
+    const QString lfs = findLfsExecutable();
+    if (lfs.isEmpty())
+        return failureResult(tr("Git LFS is not installed."));
+    const QStringList args{QStringLiteral("track"), trimmed};
+    const GitProcessResult process = GitProcess::run(lfs, args, m_rootPath);
+    OperationResult result;
+    result.command = QStringLiteral("git lfs track %1").arg(trimmed);
+    if (!process.isSuccess()) {
+        result.ok = false;
+        result.message = !process.standardError.isEmpty() ? process.standardError : process.errorMessage;
+        return result;
+    }
+    result.ok = true;
+    result.message = tr("Tracking “%1” with Git LFS (.gitattributes updated — review and commit it).").arg(trimmed);
+    return result;
+}
+
+QList<SubmoduleInfo> GitRepository::submodules() const
+{
+    if (!m_valid)
+        return {};
+    const GitProcessResult result =
+        m_client->run({QStringLiteral("submodule"), QStringLiteral("status")}, m_rootPath);
+    if (!result.isSuccess())
+        return {};
+    return SubmoduleInfo::parseStatus(result.standardOutput);
+}
+
+OperationResult GitRepository::submoduleUpdate(bool initialize)
+{
+    if (!m_valid)
+        return failureResult(tr("No repository is open."));
+    QStringList args{QStringLiteral("submodule"), QStringLiteral("update")};
+    if (initialize)
+        args.append(QStringLiteral("--init"));
+    return runResult(m_client->run(args, m_rootPath, 10 * 60 * 1000), args,
+                     tr("Updated submodules."), m_client);
+}
+
+OperationResult GitRepository::submoduleSync()
+{
+    if (!m_valid)
+        return failureResult(tr("No repository is open."));
+    const QStringList args{QStringLiteral("submodule"), QStringLiteral("sync")};
+    return runResult(m_client->run(args, m_rootPath), args, tr("Synchronized submodule URLs."), m_client);
+}
+
+QList<WorktreeInfo> GitRepository::worktrees() const
+{
+    if (!m_valid)
+        return {};
+    const GitProcessResult result =
+        m_client->run({QStringLiteral("worktree"), QStringLiteral("list"), QStringLiteral("--porcelain")}, m_rootPath);
+    if (!result.isSuccess())
+        return {};
+    return WorktreeInfo::parsePorcelain(result.standardOutput);
+}
+
+OperationResult GitRepository::worktreeAdd(const QString &path, const QString &source, bool newBranch)
+{
+    const QString trimmedPath = path.trimmed();
+    if (!m_valid)
+        return failureResult(tr("No repository is open."));
+    if (trimmedPath.isEmpty())
+        return failureResult(tr("Enter a directory for the new worktree."));
+    QStringList args{QStringLiteral("worktree"), QStringLiteral("add")};
+    if (newBranch) {
+        if (source.trimmed().isEmpty())
+            return failureResult(tr("Enter a name for the new branch."));
+        args.append(QStringLiteral("-b"));
+        args.append(source.trimmed());
+    }
+    args.append(trimmedPath);
+    if (!newBranch && !source.trimmed().isEmpty())
+        args.append(source.trimmed());
+    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+                                       tr("Added worktree at %1.").arg(trimmedPath), m_client);
+    return result;
+}
+
+OperationResult GitRepository::worktreeRemove(const QString &path, bool force)
+{
+    if (!m_valid)
+        return failureResult(tr("No repository is open."));
+    if (path.isEmpty())
+        return failureResult(tr("No worktree selected."));
+    QStringList args{QStringLiteral("worktree"), QStringLiteral("remove")};
+    if (force)
+        args.append(QStringLiteral("--force"));
+    args.append(path);
+    return runResult(m_client->run(args, m_rootPath), args, tr("Removed worktree %1.").arg(path), m_client);
+}
+
+OperationResult GitRepository::worktreePrune()
+{
+    if (!m_valid)
+        return failureResult(tr("No repository is open."));
+    const QStringList args{QStringLiteral("worktree"), QStringLiteral("prune")};
+    return runResult(m_client->run(args, m_rootPath), args, tr("Pruned worktree metadata."), m_client);
+}
+
+// --- Milestone 4: repository facts + .gitignore ---------------------------------------
+
+namespace
+{
+qlonglong directorySize(const QString &path, int depth = 0)
+{
+    // Depth cap keeps pathological repositories (nested node_modules and
+    // the like inside .git are impossible, but caution is cheap).
+    if (depth > 12)
+        return 0;
+    qlonglong total = 0;
+    QDirIterator it(path, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot);
+    while (it.hasNext()) {
+        it.next();
+        total += it.fileInfo().size();
+    }
+    QDirIterator dirs(path, QDir::Dirs | QDir::Hidden | QDir::NoDotAndDotDot);
+    while (dirs.hasNext()) {
+        dirs.next();
+        total += directorySize(dirs.filePath(), depth + 1);
+    }
+    return total;
+}
+} // namespace
+
+RepoInfo GitRepository::repositoryInfo() const
+{
+    RepoInfo info;
+    if (!m_valid)
+        return info;
+    info.valid = true;
+    info.rootPath = m_rootPath;
+    info.gitDir = m_gitDir;
+    info.isBare = m_bare;
+    const HeadInfo head = m_head;
+    info.branch = head.branch;
+    info.detached = head.detached;
+    info.unborn = head.unborn;
+    info.headHash = head.commitHash;
+    if (!head.unborn) {
+        const GitProcessResult count =
+            m_client->run({QStringLiteral("rev-list"), QStringLiteral("--count"), QStringLiteral("HEAD")}, m_rootPath);
+        if (count.isSuccess())
+            info.commitCount = count.standardOutput.trimmed().toInt();
+    } else {
+        info.commitCount = 0;
+    }
+    info.remoteCount = remotes().size();
+    info.branchCount = branches().size();
+    info.tagCount = tags().size();
+    info.stashCount = stashList().size();
+    if (!m_gitDir.isEmpty())
+        info.gitDirSizeBytes = directorySize(m_gitDir);
+    return info;
+}
+
+QString GitRepository::readGitignore() const
+{
+    if (!m_valid)
+        return {};
+    QFile file(QDir(m_rootPath).filePath(QStringLiteral(".gitignore")));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return {};
+    return QString::fromUtf8(file.readAll());
+}
+
+OperationResult GitRepository::writeGitignore(const QString &content)
+{
+    OperationResult result;
+    result.command = tr("# edited .gitignore (file operation, no Git command)");
+    if (!m_valid) {
+        result.message = tr("No repository is open.");
+        return result;
+    }
+    QFile file(QDir(m_rootPath).filePath(QStringLiteral(".gitignore")));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+        result.message = tr("Could not write .gitignore: %1").arg(file.errorString());
+        return result;
+    }
+    file.write(content.toUtf8());
+    result.ok = true;
+    result.message = tr("Saved .gitignore. Review it with git diff, then stage and commit.");
+    return result;
+}
+
+QMap<QString, QStringList> GitRepository::gitignorePresets()
+{
+    return {
+        {QStringLiteral("Windows"), {QStringLiteral("Thumbs.db"), QStringLiteral("Desktop.ini"), QStringLiteral("$RECYCLE.BIN/")}},
+        {QStringLiteral("Qt / C++ build"), {QStringLiteral("build*/"), QStringLiteral("*.o"), QStringLiteral("*.obj"), QStringLiteral("moc_*.cpp"), QStringLiteral("ui_*.h"), QStringLiteral("*.user")}},
+        {QStringLiteral("Python"), {QStringLiteral("__pycache__/"), QStringLiteral("*.pyc"), QStringLiteral(".venv/"), QStringLiteral("*.egg-info/")}},
+        {QStringLiteral("Node"), {QStringLiteral("node_modules/"), QStringLiteral("dist/"), QStringLiteral(".env")}},
+        {QStringLiteral("macOS"), {QStringLiteral(".DS_Store"), QStringLiteral(".AppleDouble")}},
+    };
 }
 
 } // namespace Guit

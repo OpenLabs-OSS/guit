@@ -6,6 +6,7 @@
 #include "GitClient.h"
 #include "GitModels.h"
 
+#include <QMap>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -186,10 +187,39 @@ public:
     OperationResult resolveWithOurs(const QString &path);
     OperationResult resolveWithTheirs(const QString &path);
 
+    // --- Milestone 4: graph + search -----------------------------------------
+    // All refs, topo-ordered, for the graph view and commit search.
+    QList<CommitInfo> logAll(int maxCount = 2000) const;
+    // Short ref names (branches, tags) grouped by the commit they point at.
+    QMap<QString, QStringList> refsByHash() const;
+    // Case-insensitive match over subject/body/author/hash.
+    QList<CommitInfo> searchCommits(const QString &query, int maxCount = 2000) const;
+
+    // --- Milestone 4: reflog ----------------------------------------------------
+    QList<ReflogEntry> reflog(int maxCount = 200) const;
+
+    // --- Milestone 4: LFS / submodules / worktrees --------------------------------
+    LfsInfo lfsInfo() const;
+    OperationResult lfsTrack(const QString &pattern);
+    QList<SubmoduleInfo> submodules() const;
+    OperationResult submoduleUpdate(bool initialize);
+    OperationResult submoduleSync();
+    QList<WorktreeInfo> worktrees() const;
+    OperationResult worktreeAdd(const QString &path, const QString &source, bool newBranch);
+    OperationResult worktreeRemove(const QString &path, bool force);
+    OperationResult worktreePrune();
+
+    // --- Milestone 4: repository facts + .gitignore ---------------------------------
+    RepoInfo repositoryInfo() const;
+    QString readGitignore() const;
+    OperationResult writeGitignore(const QString &content);
+    static QMap<QString, QStringList> gitignorePresets();
+
 signals:
     void repositoryChanged();
     void repositoryClosed();
     void openFailed(const QString &reason, const QString &details);
+    void networkStarted(const QString &command);
     void networkProgress(const QString &text);
     void networkFinished(const Guit::OperationResult &result);
 
