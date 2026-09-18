@@ -6,6 +6,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QPair>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QString>
@@ -28,9 +29,13 @@ inline QString testGitExecutable()
 class TempRepo
 {
 public:
-    TempRepo()
+    TempRepo(bool bare = false)
     {
         QVERIFY2(dir.isValid(), "Failed to create temporary directory");
+        if (bare) {
+            runOrFail({QStringLiteral("init"), QStringLiteral("--bare"), QStringLiteral("-b"), QStringLiteral("main")});
+            return;
+        }
         runOrFail({QStringLiteral("init"), QStringLiteral("-b"), QStringLiteral("main")});
         // Repo-local identity: Guit itself never invents an author, but the
         // test suite needs commits to succeed on machines without Git
@@ -86,6 +91,22 @@ public:
     {
         runOrFail({QStringLiteral("add"), QStringLiteral("-A")});
         runOrFail({QStringLiteral("commit"), QStringLiteral("-m"), message});
+    }
+
+    // Runs git in an arbitrary directory (e.g. inspecting a bare remote).
+    // Returns {exitCode, stdout}.
+    static QPair<int, QString> runIn(const QString &directory, const QStringList &args)
+    {
+        QProcess git;
+        git.setProgram(testGitExecutable());
+        git.setArguments(args);
+        git.setWorkingDirectory(directory);
+        git.start();
+        if (!git.waitForStarted())
+            return {-100, {}};
+        if (!git.waitForFinished(30000))
+            return {-101, {}};
+        return {git.exitCode(), QString::fromUtf8(git.readAllStandardOutput())};
     }
 
 private:

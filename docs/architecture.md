@@ -43,6 +43,12 @@ transparency; that string is never parsed or executed.
 - Branches: `git for-each-ref --format=` with **`%1f` separators, not
   `%x1f`**. Unlike `git log`, `for-each-ref` decodes `%NN`
   percent-escapes and emits `%x1f` literally (verified against real Git).
+- Remotes: `git remote -v` (tab-separated name/URL/kind).
+- Tags: `git for-each-ref refs/tags` with `%1f` separators (peeled
+  `%(*objectname)` distinguishes annotated from lightweight tags).
+- Stash: `git stash list` parsed with a strict `stash@{N}:` regex.
+- Commit files: `git diff-tree --name-status` needs explicit
+  `--find-renames` — plumbing does not detect renames by itself.
 
 ### Error handling without exceptions
 
@@ -51,11 +57,25 @@ Every operation returns a result object (`GitProcessResult`,
 carry the `GitError` category, a user-facing message, and the raw Git
 output for the details view. Nothing Git-related throws.
 
-### Async from the start
+### Async network operations
 
 `AsyncGitProcess` wraps `QProcess` with `finished`/`progress` signals,
-timeout handling, and `cancel()`. Milestone 1 uses synchronous calls for
-fast local operations; clone/fetch/pull/push will use this class.
+timeout handling, and `cancel()`. Fast local operations use synchronous
+`GitProcess::run`; fetch/pull/push/clone run through `AsyncGitProcess`
+owned by `GitRepository` (network) or `RepositoryController` (clone), so
+the UI stays responsive with progress and cancel. Progress handlers
+consume the pipes as data arrives, therefore output is accumulated into
+buffers — failure diagnostics survive in the final result.
+
+### Operation state and conflicts
+
+`GitRepository::operationState()` reads `.git` directly (`MERGE_HEAD`,
+`rebase-merge/`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`), so operations
+started outside Guit are detected too. `OperationResult::conflict`
+marks "stopped at conflicts" distinctly from errors: controllers route
+it to conflict resolution (resolve -> stage -> continue, or abort)
+instead of an error box. All `--continue` flows pin
+`-c core.editor=true` so no interactive editor can hang the UI.
 
 ### Settings, themes, logging
 
