@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "ResetDialog.h"
 
 #include <QDialogButtonBox>
@@ -23,12 +24,15 @@ ResetDialog::ResetDialog(const QString &target, QWidget *parent)
     auto *softInfo = new QLabel(resetModeExplanation(ResetMode::Soft), this);
     auto *mixedInfo = new QLabel(resetModeExplanation(ResetMode::Mixed), this);
     auto *hardInfo = new QLabel(resetModeExplanation(ResetMode::Hard), this);
-    hardInfo->setStyleSheet(QStringLiteral("color: #B00020;"));
+    hardInfo->setWordWrap(true);
+    Theme::applyDanger(hardInfo);
     for (QLabel *label : {softInfo, mixedInfo, hardInfo})
         label->setWordWrap(true);
 
     auto *command = new QLabel(tr("Git: git reset --soft/--mixed/--hard %1").arg(target), this);
-    command->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
+    command->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    Theme::applyMono(command);
+    Theme::applyMuted(command);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Reset"));

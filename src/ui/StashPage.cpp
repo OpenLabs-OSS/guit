@@ -1,5 +1,7 @@
+#include "Theme.h"
 #include "StashPage.h"
 
+#include "Theme.h"
 #include "StashDialog.h"
 
 #include <QHBoxLayout>
@@ -19,9 +21,9 @@ StashPage::StashPage(StashController *controller, QWidget *parent)
     , m_commandLabel(new QLabel(this))
 {
     m_infoLabel->setWordWrap(true);
-    m_commandLabel->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
+    Theme::applyMono(m_commandLabel);
 
     auto *saveButton = new QPushButton(tr("Stash…"), this);
     saveButton->setToolTip(tr("Shelve uncommitted changes to restore later (git stash push)."));

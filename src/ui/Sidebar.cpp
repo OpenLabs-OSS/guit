@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "Sidebar.h"
 
 #include <QListWidgetItem>
@@ -9,9 +10,22 @@ namespace Guit
 Sidebar::Sidebar(QWidget *parent)
     : QWidget(parent)
     , m_list(new QListWidget(this))
+    , m_repoLabel(new QLabel(tr("No repository"), this))
+    , m_branchLabel(new QLabel(this))
 {
+    Theme::applySection(m_repoLabel);
+    m_repoLabel->setWordWrap(true);
+    m_branchLabel->setWordWrap(true);
+    Theme::applySecondary(m_branchLabel);
+    Theme::applyMono(m_branchLabel);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
     m_list->setFocusPolicy(Qt::StrongFocus);
+    // Styled globally as QListWidget#SidebarNav: flat sidebar list with an
+    // accent indicator on the active item.
+    m_list->setObjectName(QStringLiteral("SidebarNav"));
+    m_list->setFixedWidth(Theme::sidebarWidth());
+    m_list->setFrameShape(QFrame::NoFrame);
+    m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 
     addItem(Page::Overview);
     addItem(Page::Changes);
@@ -24,8 +38,12 @@ Sidebar::Sidebar(QWidget *parent)
     m_list->setCurrentRow(0);
 
     auto *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(4, 4, 4, 4);
-    layout->addWidget(m_list);
+    layout->setContentsMargins(12, 12, 0, 0);
+    layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_repoLabel);
+    layout->addWidget(m_branchLabel);
+    layout->addSpacing(Theme::controlSpacing());
+    layout->addWidget(m_list, 1);
 
     connect(m_list, &QListWidget::currentRowChanged, this, [this](int row) {
         const QListWidgetItem *item = m_list->item(row);
@@ -44,6 +62,14 @@ void Sidebar::setCurrentPage(Page page)
             return;
         }
     }
+}
+
+void Sidebar::setContext(const QString &repository, const QString &branch)
+{
+    m_repoLabel->setText(repository.isEmpty() ? tr("No repository") : repository);
+    m_repoLabel->setToolTip(repository);
+    m_branchLabel->setText(branch);
+    m_branchLabel->setVisible(!branch.isEmpty());
 }
 
 QString Sidebar::pageTitle(Page page)

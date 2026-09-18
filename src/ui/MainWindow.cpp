@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include "Theme.h"
 #include "CloneDialog.h"
 #include "HelpDialogs.h"
 #include "PlaceholderPage.h"
@@ -288,7 +289,11 @@ void MainWindow::buildStatusBar()
 {
     m_repoLabel = new QLabel(tr("No repository"), statusBar());
     m_branchLabel = new QLabel(statusBar());
+    QFont branchFont = m_branchLabel->font();
+    branchFont.setWeight(QFont::DemiBold);
+    m_branchLabel->setFont(branchFont);
     m_gitLabel = new QLabel(statusBar());
+    Theme::applyMuted(m_gitLabel);
     statusBar()->addWidget(m_repoLabel, 1);
     statusBar()->addPermanentWidget(m_branchLabel);
     statusBar()->addPermanentWidget(m_gitLabel);
@@ -609,15 +614,20 @@ void MainWindow::updateStatusBar()
     if (!repository->isValid()) {
         m_repoLabel->setText(tr("No repository"));
         m_branchLabel->clear();
+        m_sidebar->setContext({}, {});
     } else {
         m_repoLabel->setText(repository->rootPath());
         const HeadInfo head = repository->head();
+        QString branchText;
         if (head.unborn)
-            m_branchLabel->setText(head.branch.isEmpty() ? tr("No commits yet") : head.branch + tr(" (no commits yet)"));
+            branchText = head.branch.isEmpty() ? tr("No commits yet") : head.branch + tr(" (no commits yet)");
         else if (head.detached)
-            m_branchLabel->setText(tr("Detached HEAD"));
+            branchText = tr("Detached HEAD");
         else
-            m_branchLabel->setText(head.branch);
+            branchText = head.branch;
+        m_branchLabel->setText(branchText);
+        const QString repoName = QDir(repository->rootPath()).dirName();
+        m_sidebar->setContext(repoName.isEmpty() ? repository->rootPath() : repoName, branchText);
     }
     if (repository->client()->hasGit())
         m_gitLabel->setText(tr("Git %1").arg(repository->client()->version().toString()));

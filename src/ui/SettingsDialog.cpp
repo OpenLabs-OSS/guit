@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "SettingsDialog.h"
 
 #include <QDialogButtonBox>
@@ -79,21 +80,17 @@ void SettingsDialog::clearGit()
 void SettingsDialog::validateGit()
 {
     const QString path = m_gitEdit->text().trimmed();
+    const bool ok = path.isEmpty() || QFileInfo(path).isExecutable();
+    m_gitStatus->setProperty("danger", !ok);
+    Theme::repolish(m_gitStatus);
     if (path.isEmpty()) {
         m_gitStatus->setText(tr("Using the Git found on PATH."));
-        m_gitStatus->setStyleSheet(QString());
-        m_okButton->setEnabled(true);
-        return;
-    }
-    if (QFileInfo(path).isExecutable()) {
+    } else if (ok) {
         m_gitStatus->setText(tr("Custom Git executable selected. Takes effect immediately."));
-        m_gitStatus->setStyleSheet(QString());
-        m_okButton->setEnabled(true);
     } else {
         m_gitStatus->setText(tr("Not an executable file."));
-        m_gitStatus->setStyleSheet(QStringLiteral("color: #B00020;"));
-        m_okButton->setEnabled(false);
     }
+    m_okButton->setEnabled(ok);
 }
 
 void SettingsDialog::apply()

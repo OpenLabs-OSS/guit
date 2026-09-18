@@ -1,7 +1,11 @@
+#include "Theme.h"
 #include "BranchesPage.h"
 
+#include "Theme.h"
 #include "BranchDialog.h"
+#include "Theme.h"
 #include "MergeDialog.h"
+#include "Theme.h"
 #include "RebaseDialog.h"
 
 #include <QHBoxLayout>
@@ -22,9 +26,9 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     , m_diff(new DiffViewer(this))
     , m_commandLabel(new QLabel(this))
 {
-    m_commandLabel->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
+    Theme::applyMono(m_commandLabel);
     m_compareLabel->setWordWrap(true);
 
     auto *newButton = new QPushButton(tr("New…"), this);

@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "RebaseDialog.h"
 
 #include <QDialogButtonBox>
@@ -24,7 +25,7 @@ RebaseDialog::RebaseDialog(const QStringList &branches, const QString &current, 
                                   "Only rebase commits you have not shared yet."),
                                this);
     warning->setWordWrap(true);
-    warning->setStyleSheet(QStringLiteral("color: #B00020;"));
+    Theme::applyDanger(warning);
 
     auto *form = new QFormLayout();
     form->addRow(tr("Replay %1 onto:").arg(current.isEmpty() ? tr("the current branch") : current), m_ontoBox);

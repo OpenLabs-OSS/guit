@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "ChangesPage.h"
 
 #include "../git/GitModels.h"
@@ -30,9 +31,9 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     m_body->setPlaceholderText(tr("Extended description (optional)"));
     m_body->setMaximumHeight(80);
     m_amend->setToolTip(tr("Fold the staged changes into the previous commit instead of creating a new one."));
-    m_commandLabel->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
-    m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
+    m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    Theme::applyMono(m_commandLabel);
 
     auto *stageButton = new QPushButton(tr("Stage"), this);
     stageButton->setToolTip(tr("Move the selected changes into the staging area (git add)."));

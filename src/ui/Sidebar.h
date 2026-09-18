@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QLabel>
 #include <QListWidget>
 #include <QWidget>
 
@@ -32,6 +33,10 @@ public:
     void setCurrentPage(Page page);
     [[nodiscard]] Page currentPage() const { return m_current; }
 
+    // Repository context shown above the navigation: directory name and
+    // current branch (or detached-HEAD state).
+    void setContext(const QString &repository, const QString &branch);
+
     static QString pageTitle(Page page);
     static QString pageExplanation(Page page);
 
@@ -42,6 +47,8 @@ private:
     void addItem(Page page);
 
     QListWidget *m_list = nullptr;
+    QLabel *m_repoLabel = nullptr;
+    QLabel *m_branchLabel = nullptr;
     Page m_current = Page::Overview;
 };
 

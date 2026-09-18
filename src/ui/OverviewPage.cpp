@@ -1,6 +1,9 @@
+#include "Theme.h"
 #include "OverviewPage.h"
 
+#include "Theme.h"
 #include "GitignoreDialog.h"
+#include "Theme.h"
 #include "WorktreeDialog.h"
 
 #include <QFontDatabase>
@@ -44,17 +47,11 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
     m_lfsLabel->setWordWrap(true);
     m_commandLabel->setWordWrap(true);
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_commandLabel->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
-    m_reflogList->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    Theme::applyMono(m_commandLabel);
+    m_reflogList->setFont(Theme::monoFont());
 
-    QFont titleFont = m_repoTitle->font();
-    titleFont.setPointSize(titleFont.pointSize() + 4);
-    titleFont.setBold(true);
-    m_repoTitle->setFont(titleFont);
-
-    QFont sectionFont = m_recentLabel->font();
-    sectionFont.setBold(true);
-    m_recentLabel->setFont(sectionFont);
+    Theme::applyTitle(m_repoTitle);
+    Theme::applySection(m_recentLabel);
 
     m_terminalButton->setToolTip(tr("Open this repository in your terminal."));
     m_gitignoreButton->setToolTip(tr("Edit .gitignore with common-pattern presets."));
@@ -151,12 +148,13 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
 
 void OverviewPage::setData(const Data &data)
 {
-    if (!data.gitAvailable) {
+    const bool gitMissing = !data.gitAvailable;
+    m_gitBanner->setProperty("danger", gitMissing);
+    Theme::repolish(m_gitBanner);
+    if (gitMissing) {
         m_gitBanner->setText(tr("Git was not found. Install Git and make sure it is on PATH, then restart Guit."));
-        m_gitBanner->setStyleSheet(QStringLiteral("color: #B00020;"));
     } else {
         m_gitBanner->setText(tr("Git %1 ready.").arg(data.gitVersion));
-        m_gitBanner->setStyleSheet(QString());
     }
 
     if (!data.hasRepository) {

@@ -1,6 +1,9 @@
+#include "Theme.h"
 #include "RemotesPage.h"
 
+#include "Theme.h"
 #include "PushDialog.h"
+#include "Theme.h"
 #include "RemoteDialog.h"
 #include "../controllers/BranchController.h"
 
@@ -28,9 +31,9 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
 {
     m_detailLabel->setWordWrap(true);
     m_detailLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_commandLabel->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
+    Theme::applyMono(m_commandLabel);
     m_pruneBox->setToolTip(tr("Remove local remote-tracking branches whose upstream branch is gone (git fetch --prune)."));
 
     auto *addButton = new QPushButton(tr("Add…"), this);

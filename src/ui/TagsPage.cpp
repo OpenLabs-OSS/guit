@@ -1,5 +1,7 @@
+#include "Theme.h"
 #include "TagsPage.h"
 
+#include "Theme.h"
 #include "TagDialog.h"
 
 #include <QHBoxLayout>
@@ -21,9 +23,9 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
 {
     m_infoLabel->setWordWrap(true);
     m_infoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    m_commandLabel->setStyleSheet(QStringLiteral("font-family: Consolas, monospace;"));
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
+    Theme::applyMono(m_commandLabel);
     m_remoteBox->addItems(remoteNames);
 
     auto *newButton = new QPushButton(tr("New…"), this);

@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "BranchDialog.h"
 
 #include "../controllers/BranchController.h"
@@ -75,14 +76,16 @@ void BranchDialog::setOldName(const QString &oldName)
 void BranchDialog::validate()
 {
     const bool valid = m_controller->validateBranchName(m_nameEdit->text());
+    // The danger property drives the hint color through the global
+    // stylesheet, so it follows theme switches automatically.
+    m_hintLabel->setProperty("danger", !valid);
+    Theme::repolish(m_hintLabel);
     if (valid) {
         m_hintLabel->setText(m_mode == Mode::Create ? tr("Git: git switch -c %1").arg(branchName())
                                                     : tr("Git: git branch --move %1").arg(branchName()));
-        m_hintLabel->setStyleSheet(QString());
     } else {
         m_hintLabel->setText(tr("Not a valid branch name. Use letters, digits, /, -, _, and dots — "
                                 "avoid spaces and ~ ^ : ? * [ \\."));
-        m_hintLabel->setStyleSheet(QStringLiteral("color: #B00020;"));
     }
     if (m_okButton != nullptr)
         m_okButton->setEnabled(valid);
