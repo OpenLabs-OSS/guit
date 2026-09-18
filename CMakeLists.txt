@@ -25,6 +25,7 @@ if(GUIT_BUILD_TESTS)
 endif()
 
 add_subdirectory(src)
+add_subdirectory(tools)
 
 if(GUIT_BUILD_TESTS)
     add_subdirectory(tests)
