@@ -3,8 +3,6 @@
 #include "AppSettings.h"
 
 #include <QApplication>
-#include <QPalette>
-#include <QStyle>
 #include <QStyleHints>
 
 namespace Guit
@@ -16,26 +14,38 @@ ThemeManager::ThemeManager(AppSettings *settings, QObject *parent)
 {
     m_current = themeFromString(m_settings != nullptr ? m_settings->theme() : QString());
     apply(m_current);
+    // Follow OS light/dark switches while in System mode.
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, &ThemeManager::reapply);
 }
 
 ThemeManager::Theme ThemeManager::themeFromString(const QString &name)
 {
-    const QString normalized = name.trimmed().toLower();
-    if (normalized == QStringLiteral("light"))
-        return Theme::Light;
-    if (normalized == QStringLiteral("dark"))
-        return Theme::Dark;
-    return Theme::System;
+    switch (::Guit::Theme::modeFromString(name)) {
+    case ThemeMode::Light: return Theme::Light;
+    case ThemeMode::Dark:  return Theme::Dark;
+    case ThemeMode::System:
+    default:               return Theme::System;
+    }
 }
 
 QString ThemeManager::themeToString(Theme theme)
 {
+    return ::Guit::Theme::modeToString(toMode(theme));
+}
+
+ThemeMode ThemeManager::toMode(Theme theme)
+{
     switch (theme) {
-    case Theme::Light: return QStringLiteral("light");
-    case Theme::Dark:  return QStringLiteral("dark");
+    case Theme::Light: return ThemeMode::Light;
+    case Theme::Dark:  return ThemeMode::Dark;
     case Theme::System:
-    default:           return QStringLiteral("system");
+    default:           return ThemeMode::System;
     }
+}
+
+bool ThemeManager::isDark() const
+{
+    return ::Guit::Theme::resolve(toMode(m_current)).isDark;
 }
 
 void ThemeManager::setTheme(Theme theme)
@@ -51,51 +61,17 @@ void ThemeManager::setTheme(Theme theme)
     emit themeChanged(theme);
 }
 
+void ThemeManager::reapply()
+{
+    // OS scheme changed: only System mode is affected. Re-applying also
+    // re-polishes every widget through the fresh stylesheet.
+    if (m_current == Theme::System)
+        apply(m_current);
+}
+
 void ThemeManager::apply(Theme theme)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    QStyleHints *hints = QGuiApplication::styleHints();
-    switch (theme) {
-    case Theme::Light:
-        hints->setColorScheme(Qt::ColorScheme::Light);
-        qApp->setPalette(qApp->style()->standardPalette());
-        break;
-    case Theme::Dark:
-        hints->setColorScheme(Qt::ColorScheme::Dark);
-        break;
-    case Theme::System:
-    default:
-        hints->unsetColorScheme();
-        qApp->setPalette(qApp->style()->standardPalette());
-        break;
-    }
-#endif
-    if (theme == Theme::Dark) {
-        // Explicit dark palette: readable in every widget without
-        // decorative styling (no gradients, no heavy custom CSS).
-        QPalette dark;
-        const QColor window(0x2B2B2B);
-        const QColor base(0x1E1E1E);
-        const QColor text(0xE8E8E8);
-        const QColor disabled(0x808080);
-        const QColor highlight(0x2F7AD6);
-        dark.setColor(QPalette::Window, window);
-        dark.setColor(QPalette::WindowText, text);
-        dark.setColor(QPalette::Base, base);
-        dark.setColor(QPalette::AlternateBase, window);
-        dark.setColor(QPalette::Text, text);
-        dark.setColor(QPalette::Button, window);
-        dark.setColor(QPalette::ButtonText, text);
-        dark.setColor(QPalette::BrightText, Qt::white);
-        dark.setColor(QPalette::Highlight, highlight);
-        dark.setColor(QPalette::HighlightedText, Qt::white);
-        dark.setColor(QPalette::Link, QColor(0x6CB2FF));
-        dark.setColor(QPalette::PlaceholderText, disabled);
-        dark.setColor(QPalette::Disabled, QPalette::Text, disabled);
-        dark.setColor(QPalette::Disabled, QPalette::WindowText, disabled);
-        dark.setColor(QPalette::Disabled, QPalette::ButtonText, disabled);
-        qApp->setPalette(dark);
-    }
+    ::Guit::Theme::apply(toMode(theme));
 }
 
 } // namespace Guit
