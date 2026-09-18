@@ -8,6 +8,7 @@ RemoteController::RemoteController(GitRepository *repository, QObject *parent)
     , m_repository(repository)
 {
     connect(m_repository, &GitRepository::networkProgress, this, &RemoteController::networkProgress);
+    connect(m_repository, &GitRepository::networkStarted, this, &RemoteController::networkStarted);
     connect(m_repository, &GitRepository::networkFinished, this, [this](const OperationResult &result) {
         m_repository->refreshHead();
         emit headChanged();

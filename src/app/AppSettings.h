@@ -30,6 +30,15 @@ public:
     void removeRecentRepository(const QString &path);
     void clearRecentRepositories();
 
+    // Beginner mode (default) emphasizes explanations and safe defaults;
+    // advanced mode reveals lower-level details (reflog, LFS, submodules,
+    // worktrees, extended repository facts).
+    bool advancedMode() const;
+    void setAdvancedMode(bool advanced);
+
+    bool notificationsEnabled() const;
+    void setNotificationsEnabled(bool enabled);
+
     QByteArray windowGeometry() const;
     void setWindowGeometry(const QByteArray &geometry);
 

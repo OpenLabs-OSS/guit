@@ -37,6 +37,7 @@ public slots:
 signals:
     void remotesChanged(const QList<Guit::RemoteInfo> &remotes);
     void remoteOperationDone(const QString &message, const QString &command);
+    void networkStarted(const QString &command);
     void networkProgress(const QString &text);
     void networkFinished(const Guit::OperationResult &result);
     void operationFailed(const QString &reason, const QString &details, const QString &command);

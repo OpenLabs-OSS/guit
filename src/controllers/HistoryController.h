@@ -1,8 +1,10 @@
 #pragma once
 
 #include "../git/GitModels.h"
+#include "../git/GraphLanes.h"
 #include "../git/GitRepository.h"
 
+#include <QMap>
 #include <QObject>
 #include <QString>
 
@@ -23,9 +25,15 @@ public:
 public slots:
     void refresh();
     void selectCommit(const QString &hash);
+    void search(const QString &query);
+    void clearSearch();
 
 signals:
-    void historyChanged(const QList<Guit::CommitInfo> &commits);
+    void historyChanged(const QList<Guit::CommitInfo> &commits,
+                        const QMap<QString, QStringList> &refs,
+                        const QList<Guit::GraphRow> &graph,
+                        const QString &headHash);
+    void searchChanged(const QList<Guit::CommitInfo> &commits, const QString &query);
     void detailsChanged(const Guit::CommitDetails &details);
     void operationFailed(const QString &reason, const QString &details);
 

@@ -11,6 +11,8 @@ constexpr char kThemeKey[] = "ui/theme";
 constexpr char kGitExecutableKey[] = "git/executable";
 constexpr char kRecentKey[] = "repository/recent";
 constexpr char kGeometryKey[] = "ui/mainWindowGeometry";
+constexpr char kAdvancedKey[] = "ui/advancedMode";
+constexpr char kNotificationsKey[] = "ui/notifications";
 } // namespace
 
 AppSettings::AppSettings(QObject *parent)
@@ -79,6 +81,26 @@ QByteArray AppSettings::windowGeometry() const
 void AppSettings::setWindowGeometry(const QByteArray &geometry)
 {
     m_settings.setValue(QString::fromLatin1(kGeometryKey), geometry);
+}
+
+bool AppSettings::advancedMode() const
+{
+    return m_settings.value(QString::fromLatin1(kAdvancedKey), false).toBool();
+}
+
+void AppSettings::setAdvancedMode(bool advanced)
+{
+    m_settings.setValue(QString::fromLatin1(kAdvancedKey), advanced);
+}
+
+bool AppSettings::notificationsEnabled() const
+{
+    return m_settings.value(QString::fromLatin1(kNotificationsKey), true).toBool();
+}
+
+void AppSettings::setNotificationsEnabled(bool enabled)
+{
+    m_settings.setValue(QString::fromLatin1(kNotificationsKey), enabled);
 }
 
 } // namespace Guit
