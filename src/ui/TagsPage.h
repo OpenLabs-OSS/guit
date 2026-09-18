@@ -5,6 +5,7 @@
 
 #include <QComboBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QWidget>
@@ -39,6 +40,7 @@ private:
 
     TagController *m_controller = nullptr;
     QListWidget *m_tagList = nullptr;
+    QLineEdit *m_filterBox = nullptr;
     QLabel *m_infoLabel = nullptr;
     DiffViewer *m_diff = nullptr;
     QLabel *m_commandLabel = nullptr;

@@ -4,6 +4,7 @@
 #include "../git/GitModels.h"
 
 #include <QHBoxLayout>
+#include <QHeaderView>
 #include <QMessageBox>
 #include <QShortcut>
 #include <QVBoxLayout>
@@ -15,8 +16,8 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     : QWidget(parent)
     , m_controller(controller)
     , m_merge(merge)
-    , m_unstagedList(new QListWidget(this))
-    , m_stagedList(new QListWidget(this))
+    , m_unstagedList(new QTreeWidget(this))
+    , m_stagedList(new QTreeWidget(this))
     , m_unstagedLabel(new QLabel(this))
     , m_stagedLabel(new QLabel(this))
     , m_diff(new DiffViewer(this))
@@ -35,9 +36,25 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     Theme::applyMono(m_commandLabel);
 
+    m_commitButton->setProperty("primary", true);
+    Theme::applySection(m_unstagedLabel);
+    Theme::applySection(m_stagedLabel);
+    for (QTreeWidget *list : {m_unstagedList, m_stagedList}) {
+        list->setColumnCount(2);
+        list->setHeaderLabels({tr("Status"), tr("File")});
+        list->setHeaderHidden(true);
+        list->setRootIsDecorated(false);
+        list->setSelectionMode(QAbstractItemView::ExtendedSelection);
+        list->setAlternatingRowColors(true);
+        list->setSortingEnabled(false);
+        list->header()->setStretchLastSection(true);
+        list->header()->resizeSection(0, 92);
+    }
+
     auto *stageButton = new QPushButton(tr("Stage"), this);
     stageButton->setToolTip(tr("Move the selected changes into the staging area (git add)."));
     auto *discardButton = new QPushButton(tr("Discard…"), this);
+    discardButton->setProperty("destructive", true);
     discardButton->setToolTip(tr("Permanently throw away the selected working-tree changes."));
     auto *unstageButton = new QPushButton(tr("Unstage"), this);
     unstageButton->setToolTip(tr("Move the selected changes back out of the staging area (git restore --staged)."));
@@ -77,6 +94,7 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     conflictLayout->addWidget(m_conflictLabel);
     conflictLayout->addLayout(conflictButtons);
     m_conflictBar = new QWidget(this);
+    m_conflictBar->setObjectName(QStringLiteral("ConflictBar"));
     m_conflictBar->setLayout(conflictLayout);
     m_conflictBar->setVisible(false);
 
@@ -130,14 +148,16 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     mainSplitter->setSizes({300, 700});
 
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    layout->setSpacing(Theme::controlSpacing());
     layout->addWidget(m_conflictBar);
     layout->addLayout(topBar);
     layout->addWidget(mainSplitter, 1);
 
     connect(m_controller, &ChangesController::statusChanged, this, &ChangesPage::onStatusChanged);
     connect(m_controller, &ChangesController::diffLoaded, this, &ChangesPage::onDiffLoaded);
-    connect(m_unstagedList, &QListWidget::itemSelectionChanged, this, &ChangesPage::onUnstagedSelection);
-    connect(m_stagedList, &QListWidget::itemSelectionChanged, this, &ChangesPage::onStagedSelection);
+    connect(m_unstagedList, &QTreeWidget::itemSelectionChanged, this, &ChangesPage::onUnstagedSelection);
+    connect(m_stagedList, &QTreeWidget::itemSelectionChanged, this, &ChangesPage::onStagedSelection);
     connect(stageButton, &QPushButton::clicked, this, &ChangesPage::onStage);
     connect(unstageButton, &QPushButton::clicked, this, &ChangesPage::onUnstage);
     connect(stageAllButton, &QPushButton::clicked, this, &ChangesPage::onStageAll);
@@ -223,20 +243,48 @@ void ChangesPage::onAbort()
     m_merge->abortOperation();
 }
 
-QString ChangesPage::entryLabel(const FileStatusEntry &entry)
+QPair<QString, QColor> ChangesPage::statusBadge(const FileStatusEntry &entry, bool stagedSide)
 {
-    QString state;
+    const ThemeSpec &spec = Theme::currentSpec();
     if (entry.isConflicted())
-        state = tr("conflicted");
-    else if (entry.isStaged() && entry.isUnstaged())
-        state = fileStateLabel(entry.stagedState) + QStringLiteral(" + ") + fileStateLabel(entry.worktreeState).toLower();
-    else if (entry.isStaged())
-        state = fileStateLabel(entry.stagedState);
-    else
-        state = fileStateLabel(entry.worktreeState);
-    if (!entry.originalPath.isEmpty())
-        return QStringLiteral("%1 → %2 (%3)").arg(entry.originalPath, entry.path, state);
-    return QStringLiteral("%1 (%2)").arg(entry.path, state);
+        return {QStringLiteral("CONFLICT"), spec.danger};
+    const FileState state = stagedSide ? entry.stagedState : entry.worktreeState;
+    switch (state) {
+    case FileState::Modified:  return {QStringLiteral("M"), spec.warning};
+    case FileState::Added:      return {QStringLiteral("A"), spec.success};
+    case FileState::Deleted:    return {QStringLiteral("D"), spec.danger};
+    case FileState::Renamed:    return {QStringLiteral("R"), spec.accent};
+    case FileState::Copied:     return {QStringLiteral("C"), spec.accent};
+    case FileState::Untracked:  return {QStringLiteral("??"), spec.mutedText};
+    case FileState::Ignored:    return {QStringLiteral("!"), spec.mutedText};
+    case FileState::Unmodified:
+    case FileState::Conflicted: break;
+    }
+    return {QStringLiteral("M"), spec.warning};
+}
+
+void ChangesPage::fillList(QTreeWidget *list, const QList<FileStatusEntry> &entries, bool stagedSide)
+{
+    list->clear();
+    QFont badgeFont = list->font();
+    badgeFont.setWeight(QFont::DemiBold);
+    for (int i = 0; i < entries.size(); ++i) {
+        const FileStatusEntry &entry = entries.at(i);
+        const auto badge = statusBadge(entry, stagedSide);
+        QString path = entry.path;
+        if (!entry.originalPath.isEmpty())
+            path = QStringLiteral("%1 → %2").arg(entry.originalPath, entry.path);
+        auto *item = new QTreeWidgetItem(list, {badge.first, path});
+        item->setData(0, Qt::UserRole, i);
+        item->setForeground(0, badge.second);
+        item->setFont(0, badgeFont);
+        if (entry.isConflicted())
+            item->setToolTip(0, tr("Conflicted — resolve it here (edit, Ours/Theirs), then stage."));
+        else if (stagedSide)
+            item->setToolTip(0, tr("In the staging area — will be included in the next commit."));
+        else
+            item->setToolTip(0, tr("Not staged — select and Stage to include it in the next commit."));
+    }
 }
 
 void ChangesPage::onStatusChanged(const StatusSnapshot &snapshot)
@@ -247,25 +295,12 @@ void ChangesPage::onStatusChanged(const StatusSnapshot &snapshot)
     m_unstagedLabel->setText(tr("Unstaged (%1)").arg(m_unstaged.size()));
     m_stagedLabel->setText(tr("Staged (%1)").arg(m_staged.size()));
 
-    m_unstagedList->clear();
-    for (int i = 0; i < m_unstaged.size(); ++i) {
-        const FileStatusEntry &entry = m_unstaged.at(i);
-        auto *item = new QListWidgetItem(entryLabel(entry), m_unstagedList);
-        item->setData(Qt::UserRole, i);
-        item->setToolTip(entry.isConflicted() ? tr("Conflicted — resolve in Milestone 3.")
-                                              : tr("Staging area: not yet included in the next commit."));
-    }
-    m_stagedList->clear();
-    for (int i = 0; i < m_staged.size(); ++i) {
-        const FileStatusEntry &entry = m_staged.at(i);
-        auto *item = new QListWidgetItem(entryLabel(entry), m_stagedList);
-        item->setData(Qt::UserRole, i);
-        item->setToolTip(tr("In the staging area — will be included in the next commit."));
-    }
+    fillList(m_unstagedList, m_unstaged, false);
+    fillList(m_stagedList, m_staged, true);
 
     const bool hasChanges = !m_unstaged.isEmpty() || !m_staged.isEmpty();
     if (!hasChanges) {
-        auto *item = new QListWidgetItem(tr("Working tree clean — nothing to commit."), m_unstagedList);
+        auto *item = new QTreeWidgetItem(m_unstagedList, {QString(), tr("Working tree clean — nothing to commit.")});
         item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
         m_diff->clear();
     }
@@ -279,44 +314,44 @@ void ChangesPage::onDiffLoaded(const QList<FileDiff> &diffs, ChangesController::
 
 void ChangesPage::onUnstagedSelection()
 {
-    const QList<QListWidgetItem *> selected = m_unstagedList->selectedItems();
+    const QList<QTreeWidgetItem *> selected = m_unstagedList->selectedItems();
     if (selected.isEmpty())
         return;
     m_stagedList->clearSelection();
-    const int index = selected.constFirst()->data(Qt::UserRole).toInt();
+    const int index = selected.constFirst()->data(0, Qt::UserRole).toInt();
     if (index >= 0 && index < m_unstaged.size())
         m_controller->loadDiff(m_unstaged.at(index).path, ChangesController::DiffKind::Unstaged);
 }
 
 void ChangesPage::onStagedSelection()
 {
-    const QList<QListWidgetItem *> selected = m_stagedList->selectedItems();
+    const QList<QTreeWidgetItem *> selected = m_stagedList->selectedItems();
     if (selected.isEmpty())
         return;
     m_unstagedList->clearSelection();
-    const int index = selected.constFirst()->data(Qt::UserRole).toInt();
+    const int index = selected.constFirst()->data(0, Qt::UserRole).toInt();
     if (index >= 0 && index < m_staged.size())
         m_controller->loadDiff(m_staged.at(index).path, ChangesController::DiffKind::Staged);
 }
 
-QStringList ChangesPage::selectedPaths(QListWidget *list) const
+QStringList ChangesPage::selectedPaths(QTreeWidget *list) const
 {
     const QList<FileStatusEntry> &source = (list == m_stagedList) ? m_staged : m_unstaged;
     QStringList paths;
-    for (QListWidgetItem *item : list->selectedItems()) {
-        const int index = item->data(Qt::UserRole).toInt();
+    for (QTreeWidgetItem *item : list->selectedItems()) {
+        const int index = item->data(0, Qt::UserRole).toInt();
         if (index >= 0 && index < source.size())
             paths.append(source.at(index).path);
     }
     return paths;
 }
 
-QList<FileStatusEntry> ChangesPage::selectedEntries(QListWidget *list) const
+QList<FileStatusEntry> ChangesPage::selectedEntries(QTreeWidget *list) const
 {
     const QList<FileStatusEntry> &source = (list == m_stagedList) ? m_staged : m_unstaged;
     QList<FileStatusEntry> result;
-    for (QListWidgetItem *item : list->selectedItems()) {
-        const int index = item->data(Qt::UserRole).toInt();
+    for (QTreeWidgetItem *item : list->selectedItems()) {
+        const int index = item->data(0, Qt::UserRole).toInt();
         if (index >= 0 && index < source.size())
             result.append(source.at(index));
     }

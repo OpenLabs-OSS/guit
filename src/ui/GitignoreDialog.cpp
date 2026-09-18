@@ -34,6 +34,7 @@ GitignoreDialog::GitignoreDialog(RepositoryInfoController *controller, const QSt
     presetRow->addWidget(addButton);
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
+    buttons->button(QDialogButtonBox::Save)->setProperty("primary", true);
 
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(presetRow);

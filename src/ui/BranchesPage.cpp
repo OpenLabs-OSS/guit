@@ -1,11 +1,8 @@
 #include "Theme.h"
 #include "BranchesPage.h"
 
-#include "Theme.h"
 #include "BranchDialog.h"
-#include "Theme.h"
 #include "MergeDialog.h"
-#include "Theme.h"
 #include "RebaseDialog.h"
 
 #include <QHBoxLayout>
@@ -25,18 +22,25 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     , m_compareLabel(new QLabel(this))
     , m_diff(new DiffViewer(this))
     , m_commandLabel(new QLabel(this))
+    , m_filterBox(new QLineEdit(this))
 {
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
     Theme::applyMono(m_commandLabel);
     m_compareLabel->setWordWrap(true);
+    Theme::applySecondary(m_compareLabel);
+    m_branchList->setAlternatingRowColors(true);
+    m_filterBox->setPlaceholderText(tr("Filter branches…"));
+    m_filterBox->setClearButtonEnabled(true);
 
     auto *newButton = new QPushButton(tr("New…"), this);
     newButton->setToolTip(tr("Create a branch (git switch -c)."));
     auto *switchButton = new QPushButton(tr("Switch"), this);
+    switchButton->setProperty("primary", true);
     switchButton->setToolTip(tr("Move HEAD to the selected branch (git switch)."));
     auto *renameButton = new QPushButton(tr("Rename…"), this);
     auto *deleteButton = new QPushButton(tr("Delete…"), this);
+    deleteButton->setProperty("destructive", true);
     deleteButton->setToolTip(tr("Delete the selected branch. Deleting an unmerged branch requires confirmation."));
     auto *mergeButton = new QPushButton(tr("Merge…"), this);
     mergeButton->setToolTip(tr("Merge a branch into the current one (git merge)."));
@@ -59,6 +63,7 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     auto *leftPane = new QWidget(this);
     auto *leftLayout = new QVBoxLayout(leftPane);
     leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->addWidget(m_filterBox);
     leftLayout->addWidget(m_branchList, 1);
     leftLayout->addLayout(actions);
 
@@ -85,6 +90,8 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     splitter->setSizes({300, 700});
 
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    layout->setSpacing(Theme::controlSpacing());
     layout->addWidget(splitter);
 
     connect(m_controller, &BranchController::branchesChanged, this, &BranchesPage::onBranchesChanged);
@@ -101,6 +108,12 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     connect(refreshButton, &QPushButton::clicked, this, &BranchesPage::refresh);
     connect(compareButton, &QPushButton::clicked, this, &BranchesPage::onCompare);
     connect(m_branchList, &QListWidget::itemDoubleClicked, this, &BranchesPage::onSwitch);
+    connect(m_filterBox, &QLineEdit::textChanged, this, &BranchesPage::applyFilter);
+}
+
+void BranchesPage::applyFilter()
+{
+    onBranchesChanged(m_branches);
 }
 
 void BranchesPage::refresh()
@@ -120,6 +133,8 @@ void BranchesPage::onBranchesChanged(const QList<BranchInfo> &branches)
 {
     m_branches = branches;
     m_branchList->clear();
+    const QString filter = m_filterBox->text().trimmed();
+    int shown = 0;
     if (branches.isEmpty()) {
         auto *item = new QListWidgetItem(tr("No branches found."), m_branchList);
         item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
@@ -127,6 +142,9 @@ void BranchesPage::onBranchesChanged(const QList<BranchInfo> &branches)
     QFont currentFont = m_branchList->font();
     currentFont.setBold(true);
     for (const BranchInfo &branch : branches) {
+        if (!filter.isEmpty() && !branch.name.contains(filter, Qt::CaseInsensitive))
+            continue;
+        ++shown;
         QString label = branch.name;
         if (branch.isCurrent)
             label = QStringLiteral("● ") + label + tr(" (current)");
@@ -137,8 +155,14 @@ void BranchesPage::onBranchesChanged(const QList<BranchInfo> &branches)
         auto *item = new QListWidgetItem(label, m_branchList);
         item->setData(Qt::UserRole, branch.name);
         item->setToolTip(branch.commitHash);
-        if (branch.isCurrent)
+        if (branch.isCurrent) {
             item->setFont(currentFont);
+            item->setForeground(Theme::currentSpec().accent);
+        }
+    }
+    if (shown == 0 && !branches.isEmpty()) {
+        auto *item = new QListWidgetItem(tr("No branches match the filter."), m_branchList);
+        item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
     }
 
     const QString previousFrom = m_fromBox->currentText();

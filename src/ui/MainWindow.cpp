@@ -88,6 +88,7 @@ MainWindow::MainWindow(RepositoryController *controller,
     // here (see logCommand). Core Guit transparency feature.
     m_commandList = new QListWidget(this);
     m_commandList->setSelectionMode(QAbstractItemView::NoSelection);
+    m_commandList->setFont(Theme::monoFont());
     m_commandList->setToolTip(tr("Every Git command Guit has executed this session."));
     auto *commandDock = new QDockWidget(tr("Git Commands"), this);
     commandDock->setObjectName(QStringLiteral("GitCommandsDock"));

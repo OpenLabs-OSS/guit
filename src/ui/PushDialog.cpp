@@ -39,6 +39,7 @@ PushDialog::PushDialog(Mode mode, const QStringList &remotes, const QStringList 
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_okButton = buttons->button(QDialogButtonBox::Ok);
+    m_okButton->setProperty(isDelete ? "destructive" : "primary", true);
     m_okButton->setText(isDelete ? tr("Delete") : tr("Push"));
 
     auto *layout = new QVBoxLayout(this);

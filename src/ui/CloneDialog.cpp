@@ -34,6 +34,7 @@ CloneDialog::CloneDialog(QWidget *parent)
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_cloneButton = buttons->button(QDialogButtonBox::Ok);
     m_cloneButton->setText(tr("Clone"));
+    m_cloneButton->setProperty("primary", true);
 
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);

@@ -6,6 +6,7 @@
 
 #include <QComboBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSplitter>
@@ -39,6 +40,7 @@ private slots:
     void onCompare();
     void onMerge();
     void onRebase();
+    void applyFilter();
     void onBranchFailed(const QString &reason, const QString &details, const QString &command);
 
 private:
@@ -52,6 +54,7 @@ private:
     QLabel *m_compareLabel = nullptr;
     DiffViewer *m_diff = nullptr;
     QLabel *m_commandLabel = nullptr;
+    QLineEdit *m_filterBox = nullptr;
     QList<BranchInfo> m_branches;
     QString m_pendingForceDelete;
 };

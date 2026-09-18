@@ -25,6 +25,7 @@ RemoteDialog::RemoteDialog(Mode mode, QWidget *parent)
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_okButton = buttons->button(QDialogButtonBox::Ok);
+    m_okButton->setProperty("primary", true);
     m_okButton->setText(mode == Mode::Add ? tr("Add") : tr("Save"));
 
     auto *layout = new QVBoxLayout(this);

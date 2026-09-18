@@ -1,3 +1,4 @@
+#include "Theme.h"
 #include "HistoryPage.h"
 
 #include "ResetDialog.h"
@@ -32,6 +33,7 @@ HistoryPage::HistoryPage(HistoryController *controller, MergeController *merge, 
     m_searchBox->setPlaceholderText(tr("Search message, author, or hash…"));
     m_searchBox->setClearButtonEnabled(true);
     m_searchBox->setToolTip(tr("Filters the loaded history. Searches commit messages, authors, and hashes."));
+    Theme::applyMuted(m_searchLabel);
     m_detailsLabel->setWordWrap(true);
     m_detailsLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
 
@@ -77,6 +79,8 @@ HistoryPage::HistoryPage(HistoryController *controller, MergeController *merge, 
     actions->addStretch(1);
 
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    layout->setSpacing(Theme::controlSpacing());
     layout->addWidget(splitter, 1);
     layout->addLayout(actions);
 

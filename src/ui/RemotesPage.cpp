@@ -1,9 +1,7 @@
 #include "Theme.h"
 #include "RemotesPage.h"
 
-#include "Theme.h"
 #include "PushDialog.h"
-#include "Theme.h"
 #include "RemoteDialog.h"
 #include "../controllers/BranchController.h"
 
@@ -39,6 +37,7 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     auto *addButton = new QPushButton(tr("Add…"), this);
     auto *editButton = new QPushButton(tr("Edit URL…"), this);
     auto *removeButton = new QPushButton(tr("Remove…"), this);
+    removeButton->setProperty("destructive", true);
     removeButton->setToolTip(tr("Forget this remote. Local branches and history are kept."));
     auto *renameButton = new QPushButton(tr("Rename…"), this);
     m_fetchButton->setToolTip(tr("Download commits and tags without changing local branches (git fetch)."));
@@ -81,7 +80,11 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     splitter->addWidget(rightPane);
     splitter->setSizes({300, 700});
 
+    m_remoteList->setAlternatingRowColors(true);
+
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    layout->setSpacing(Theme::controlSpacing());
     layout->addWidget(splitter);
 
     connect(m_controller, &RemoteController::remotesChanged, this, &RemotesPage::onRemotesChanged);

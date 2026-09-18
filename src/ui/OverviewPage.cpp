@@ -1,9 +1,7 @@
 #include "Theme.h"
 #include "OverviewPage.h"
 
-#include "Theme.h"
 #include "GitignoreDialog.h"
-#include "Theme.h"
 #include "WorktreeDialog.h"
 
 #include <QFontDatabase>
@@ -105,6 +103,8 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
 
     auto *scrollContent = new QWidget(this);
     auto *scrollLayout = new QVBoxLayout(scrollContent);
+    scrollLayout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    scrollLayout->setSpacing(Theme::sectionSpacing());
     scrollLayout->addWidget(m_gitBanner);
     scrollLayout->addWidget(m_repoTitle);
     scrollLayout->addWidget(m_repoDetails);

@@ -1,7 +1,6 @@
 #include "Theme.h"
 #include "StashPage.h"
 
-#include "Theme.h"
 #include "StashDialog.h"
 
 #include <QHBoxLayout>
@@ -32,7 +31,9 @@ StashPage::StashPage(StashController *controller, QWidget *parent)
     auto *popButton = new QPushButton(tr("Pop"), this);
     popButton->setToolTip(tr("Restore the entry and remove it from the stash (git stash pop)."));
     auto *dropButton = new QPushButton(tr("Drop…"), this);
+    dropButton->setProperty("destructive", true);
     auto *clearButton = new QPushButton(tr("Clear All…"), this);
+    clearButton->setProperty("destructive", true);
     auto *refreshButton = new QPushButton(tr("Refresh"), this);
 
     auto *actions = new QHBoxLayout();
@@ -62,7 +63,11 @@ StashPage::StashPage(StashController *controller, QWidget *parent)
     splitter->addWidget(rightPane);
     splitter->setSizes({300, 700});
 
+    m_stashList->setAlternatingRowColors(true);
+
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    layout->setSpacing(Theme::controlSpacing());
     layout->addWidget(splitter);
 
     connect(m_controller, &StashController::stashChanged, this, &StashPage::onStashChanged);

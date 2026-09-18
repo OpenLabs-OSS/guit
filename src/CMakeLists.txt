@@ -51,6 +51,8 @@ add_library(guit_core STATIC
     controllers/RepositoryInfoController.cpp
     ui/Sidebar.h
     ui/Sidebar.cpp
+    ui/Theme.h
+    ui/Theme.cpp
     ui/DiffViewer.h
     ui/DiffViewer.cpp
     ui/ChangesPage.h

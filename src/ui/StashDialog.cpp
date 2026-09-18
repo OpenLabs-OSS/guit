@@ -25,6 +25,7 @@ StashDialog::StashDialog(QWidget *parent)
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Stash"));
+    buttons->button(QDialogButtonBox::Ok)->setProperty("primary", true);
 
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);

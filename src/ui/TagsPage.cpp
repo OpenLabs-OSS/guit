@@ -1,7 +1,6 @@
 #include "Theme.h"
 #include "TagsPage.h"
 
-#include "Theme.h"
 #include "TagDialog.h"
 
 #include <QHBoxLayout>
@@ -16,6 +15,7 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     : QWidget(parent)
     , m_controller(controller)
     , m_tagList(new QListWidget(this))
+    , m_filterBox(new QLineEdit(this))
     , m_infoLabel(new QLabel(this))
     , m_diff(new DiffViewer(this))
     , m_commandLabel(new QLabel(this))
@@ -31,9 +31,14 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     auto *newButton = new QPushButton(tr("New…"), this);
     auto *inspectButton = new QPushButton(tr("Inspect"), this);
     auto *deleteButton = new QPushButton(tr("Delete…"), this);
+    deleteButton->setProperty("destructive", true);
     auto *pushButton = new QPushButton(tr("Push"), this);
+    pushButton->setProperty("primary", true);
     pushButton->setToolTip(tr("Send the selected tag to the chosen remote (git push <remote> <tag>). Tags are not pushed by default."));
     auto *refreshButton = new QPushButton(tr("Refresh"), this);
+
+    m_filterBox->setPlaceholderText(tr("Filter tags…"));
+    m_filterBox->setClearButtonEnabled(true);
 
     auto *actions = new QHBoxLayout();
     actions->addWidget(newButton);
@@ -50,6 +55,7 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     auto *leftPane = new QWidget(this);
     auto *leftLayout = new QVBoxLayout(leftPane);
     leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->addWidget(m_filterBox);
     leftLayout->addWidget(m_tagList, 1);
     leftLayout->addLayout(actions);
 
@@ -67,6 +73,8 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     splitter->setSizes({300, 700});
 
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
+    layout->setSpacing(Theme::controlSpacing());
     layout->addWidget(splitter);
 
     connect(m_controller, &TagController::tagsChanged, this, &TagsPage::onTagsChanged);
@@ -79,6 +87,8 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     connect(pushButton, &QPushButton::clicked, this, &TagsPage::onPush);
     connect(refreshButton, &QPushButton::clicked, this, &TagsPage::refresh);
     connect(m_tagList, &QListWidget::itemSelectionChanged, this, &TagsPage::onInspect);
+    connect(m_filterBox, &QLineEdit::textChanged, this, [this]() { onTagsChanged(m_tags); });
+    m_tagList->setAlternatingRowColors(true);
 }
 
 void TagsPage::setRemoteNames(const QStringList &remotes)
@@ -114,11 +124,21 @@ void TagsPage::onTagsChanged(const QList<TagInfo> &tags)
         m_diff->clear();
         return;
     }
+    const QString filter = m_filterBox->text().trimmed();
+    int shown = 0;
     for (const TagInfo &tag : tags) {
+        if (!filter.isEmpty() && !tag.name.contains(filter, Qt::CaseInsensitive))
+            continue;
+        ++shown;
         const QString label = tag.annotated ? QStringLiteral("%1 (annotated)").arg(tag.name) : tag.name;
         auto *item = new QListWidgetItem(label, m_tagList);
         item->setData(Qt::UserRole, tag.name);
         item->setToolTip(tag.targetHash);
+    }
+    if (shown == 0) {
+        auto *item = new QListWidgetItem(tr("No tags match the filter."), m_tagList);
+        item->setFlags(item->flags() & ~Qt::ItemIsSelectable);
+        return;
     }
     m_tagList->setCurrentRow(0);
 }

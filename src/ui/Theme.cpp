@@ -91,10 +91,22 @@ const ThemeSpec &Theme::currentSpec()
 
 QFont Theme::monoFont()
 {
-    // Platform monospace stack instead of a hard-coded family name.
-    QFont font = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-    font.setStyleHint(QFont::TypeWriter);
-    return font;
+    // Prefer verified monospace families over a bare style hint: the
+    // returned font is guaranteed fixed-pitch where fonts are installed.
+    static const QStringList candidates = {QStringLiteral("Cascadia Mono"), QStringLiteral("Consolas"),
+                                           QStringLiteral("Courier New"), QStringLiteral("DejaVu Sans Mono"),
+                                           QStringLiteral("Monospace")};
+    for (const QString &family : candidates) {
+        if (QFontDatabase::isFixedPitch(family)) {
+            QFont font(family);
+            font.setStyleHint(QFont::TypeWriter);
+            font.setFixedPitch(true);
+            return font;
+        }
+    }
+    QFont fallback = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    fallback.setStyleHint(QFont::TypeWriter);
+    return fallback;
 }
 
 void Theme::applyTitle(QLabel *label)
@@ -223,6 +235,7 @@ QString buildStyleSheet(const ThemeSpec &s)
     const QString accentHover = colorCss(s.accentHover);
     const QString accentText = colorCss(s.accentText);
     const QString danger = colorCss(s.danger);
+    const QString warning = colorCss(s.warning);
     const QString surface = colorCss(s.surface);
     const QString elevated = colorCss(s.elevated);
     const QString sidebar = colorCss(s.sidebar);
@@ -301,7 +314,9 @@ QString buildStyleSheet(const ThemeSpec &s)
         "QDialogButtonBox QPushButton[destructive=\"true\"] { color: %3; border-color: %3; }"
         // Completion toast overlay.
         "Toast { background: %17; color: %7; border: 1px solid %5; border-radius: 6px; }"
-        ).arg(secondary, muted, danger).arg(btnH).arg(border, surface, primary).arg(accent, elevated, accentText).arg(accentHover, surface, selection, QString::number(rowPad)).arg(selectionText, sidebar, elevated);
+        // Conflict lifecycle bar: elevated panel with a warning edge.
+        "QWidget#ConflictBar { background: %17; border: 1px solid %18; border-radius: 4px; }"
+        ).arg(secondary, muted, danger).arg(btnH).arg(border, surface, primary).arg(accent, elevated, accentText).arg(accentHover, surface, selection, QString::number(rowPad)).arg(selectionText, sidebar, elevated, warning);
 }
 
 } // namespace

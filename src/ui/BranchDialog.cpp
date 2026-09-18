@@ -40,6 +40,7 @@ BranchDialog::BranchDialog(BranchController *controller, Mode mode, QWidget *par
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_okButton = buttons->button(QDialogButtonBox::Ok);
+    m_okButton->setProperty("primary", true);
     m_okButton->setText(mode == Mode::Create ? tr("Create") : tr("Rename"));
 
     auto *layout = new QVBoxLayout(this);
