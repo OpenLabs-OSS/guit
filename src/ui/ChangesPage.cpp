@@ -4,6 +4,7 @@
 
 #include <QHBoxLayout>
 #include <QMessageBox>
+#include <QShortcut>
 #include <QVBoxLayout>
 
 namespace Guit
@@ -160,6 +161,9 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     connect(continueButton, &QPushButton::clicked, this, &ChangesPage::onContinue);
     connect(m_skipButton, &QPushButton::clicked, this, &ChangesPage::onSkip);
     connect(abortButton, &QPushButton::clicked, this, &ChangesPage::onAbort);
+    auto *commitShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Return")), this);
+    commitShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(commitShortcut, &QShortcut::activated, this, &ChangesPage::onCommit);
 }
 
 void ChangesPage::refresh()

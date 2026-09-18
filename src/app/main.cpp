@@ -5,6 +5,7 @@
 #include "../controllers/HistoryController.h"
 #include "../controllers/MergeController.h"
 #include "../controllers/RemoteController.h"
+#include "../controllers/RepositoryInfoController.h"
 #include "../controllers/StashController.h"
 #include "../controllers/TagController.h"
 #include "../controllers/RepositoryController.h"
@@ -52,8 +53,9 @@ int main(int argc, char *argv[])
     Guit::TagController tags(&repository);
     Guit::StashController stashes(&repository);
     Guit::MergeController merge(&repository);
+    Guit::RepositoryInfoController repoInfo(&repository);
     Guit::MainWindow window(&controller, &changes, &history, &branches, &remotes, &tags, &stashes, &merge,
-                            &settings, &themes);
+                            &repoInfo, &settings, &themes);
     window.show();
 
     // Optional: `guit <path>` opens a repository on startup.

@@ -86,7 +86,8 @@ void Sidebar::addItem(Page page)
 {
     auto *item = new QListWidgetItem(pageTitle(page), m_list);
     item->setData(Qt::UserRole, static_cast<int>(page));
-    item->setToolTip(pageExplanation(page));
+    // Navigation shortcut documented in Help → Keyboard Shortcuts.
+    item->setToolTip(QStringLiteral("%1 (Alt+%2)").arg(pageExplanation(page)).arg(static_cast<int>(page) + 1));
 }
 
 } // namespace Guit

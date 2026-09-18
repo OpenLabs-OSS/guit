@@ -21,6 +21,10 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     , m_detailLabel(new QLabel(this))
     , m_commandLabel(new QLabel(this))
     , m_pruneBox(new QCheckBox(tr("Prune deleted remote branches on fetch"), this))
+    , m_fetchButton(new QPushButton(tr("Fetch"), this))
+    , m_pullButton(new QPushButton(tr("Pull"), this))
+    , m_pushButton(new QPushButton(tr("Push…"), this))
+    , m_deleteButton(new QPushButton(tr("Delete Remote Branch…"), this))
 {
     m_detailLabel->setWordWrap(true);
     m_detailLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -34,13 +38,9 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     auto *removeButton = new QPushButton(tr("Remove…"), this);
     removeButton->setToolTip(tr("Forget this remote. Local branches and history are kept."));
     auto *renameButton = new QPushButton(tr("Rename…"), this);
-    auto *fetchButton = new QPushButton(tr("Fetch"), this);
-    fetchButton->setToolTip(tr("Download commits and tags without changing local branches (git fetch)."));
-    auto *pullButton = new QPushButton(tr("Pull"), this);
-    pullButton->setToolTip(tr("Fetch and integrate into the current branch (git pull)."));
-    auto *pushButton = new QPushButton(tr("Push…"), this);
-    pushButton->setToolTip(tr("Send local commits to the remote (git push)."));
-    auto *deleteButton = new QPushButton(tr("Delete Remote Branch…"), this);
+    m_fetchButton->setToolTip(tr("Download commits and tags without changing local branches (git fetch)."));
+    m_pullButton->setToolTip(tr("Fetch and integrate into the current branch (git pull)."));
+    m_pushButton->setToolTip(tr("Send local commits to the remote (git push)."));
     auto *refreshButton = new QPushButton(tr("Refresh"), this);
 
     auto *configRow = new QHBoxLayout();
@@ -51,10 +51,10 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     configRow->addStretch(1);
 
     auto *networkRow = new QHBoxLayout();
-    networkRow->addWidget(fetchButton);
-    networkRow->addWidget(pullButton);
-    networkRow->addWidget(pushButton);
-    networkRow->addWidget(deleteButton);
+    networkRow->addWidget(m_fetchButton);
+    networkRow->addWidget(m_pullButton);
+    networkRow->addWidget(m_pushButton);
+    networkRow->addWidget(m_deleteButton);
     networkRow->addWidget(refreshButton);
     networkRow->addStretch(1);
 
@@ -89,11 +89,22 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     connect(editButton, &QPushButton::clicked, this, &RemotesPage::onEdit);
     connect(removeButton, &QPushButton::clicked, this, &RemotesPage::onRemove);
     connect(renameButton, &QPushButton::clicked, this, &RemotesPage::onRename);
-    connect(fetchButton, &QPushButton::clicked, this, &RemotesPage::onFetch);
-    connect(pullButton, &QPushButton::clicked, this, &RemotesPage::onPull);
-    connect(pushButton, &QPushButton::clicked, this, &RemotesPage::onPush);
-    connect(deleteButton, &QPushButton::clicked, this, &RemotesPage::onDeleteRemoteBranch);
+    connect(m_fetchButton, &QPushButton::clicked, this, &RemotesPage::onFetch);
+    connect(m_pullButton, &QPushButton::clicked, this, &RemotesPage::onPull);
+    connect(m_pushButton, &QPushButton::clicked, this, &RemotesPage::onPush);
+    connect(m_deleteButton, &QPushButton::clicked, this, &RemotesPage::onDeleteRemoteBranch);
     connect(refreshButton, &QPushButton::clicked, this, &RemotesPage::refresh);
+    connect(m_controller, &RemoteController::networkStarted, this, [this](const QString &) { setNetworkActive(true); });
+    connect(m_controller, &RemoteController::networkFinished, this, [this](const OperationResult &) { setNetworkActive(false); });
+}
+
+void RemotesPage::setNetworkActive(bool active)
+{
+    // One network operation at a time: prevent overlapping fetch/pull/push.
+    m_fetchButton->setEnabled(!active);
+    m_pullButton->setEnabled(!active);
+    m_pushButton->setEnabled(!active);
+    m_deleteButton->setEnabled(!active);
 }
 
 void RemotesPage::refresh()

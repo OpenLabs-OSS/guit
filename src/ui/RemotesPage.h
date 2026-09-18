@@ -37,6 +37,7 @@ private slots:
     void onPush();
     void onDeleteRemoteBranch();
     void updateDetails();
+    void setNetworkActive(bool active);
 
 private:
     QString selectedRemote() const;
@@ -48,6 +49,10 @@ private:
     QLabel *m_detailLabel = nullptr;
     QLabel *m_commandLabel = nullptr;
     QCheckBox *m_pruneBox = nullptr;
+    QPushButton *m_fetchButton = nullptr;
+    QPushButton *m_pullButton = nullptr;
+    QPushButton *m_pushButton = nullptr;
+    QPushButton *m_deleteButton = nullptr;
     QList<RemoteInfo> m_remotes;
 };
 

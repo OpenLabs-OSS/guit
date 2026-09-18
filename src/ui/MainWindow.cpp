@@ -1,19 +1,25 @@
 #include "MainWindow.h"
 
 #include "CloneDialog.h"
+#include "HelpDialogs.h"
 #include "PlaceholderPage.h"
+#include "SettingsDialog.h"
 #include "../app/AppSettings.h"
 #include "../controllers/RepositoryController.h"
+#include "../utils/TerminalLauncher.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QCloseEvent>
 #include <QDir>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QInputDialog>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressDialog>
+#include <QShortcut>
 #include <QSplitter>
 #include <QStatusBar>
 
@@ -28,6 +34,7 @@ MainWindow::MainWindow(RepositoryController *controller,
                        TagController *tags,
                        StashController *stashes,
                        MergeController *merge,
+                       RepositoryInfoController *repoInfo,
                        AppSettings *settings,
                        ThemeManager *themes,
                        QWidget *parent)
@@ -40,11 +47,12 @@ MainWindow::MainWindow(RepositoryController *controller,
     , m_tags(tags)
     , m_stashes(stashes)
     , m_merge(merge)
+    , m_repoInfo(repoInfo)
     , m_settings(settings)
     , m_themes(themes)
     , m_sidebar(new Sidebar(this))
     , m_stack(new QStackedWidget(this))
-    , m_overview(new OverviewPage(this))
+    , m_overview(new OverviewPage(repoInfo, settings, this))
     , m_changesPage(new ChangesPage(changes, merge, this))
     , m_historyPage(new HistoryPage(history, merge, this))
     , m_branchesPage(new BranchesPage(branches, merge, this))
@@ -75,6 +83,19 @@ MainWindow::MainWindow(RepositoryController *controller,
     splitter->setSizes({220, 880});
     setCentralWidget(splitter);
 
+    // Git command log: every executed operation records its exact command
+    // here (see logCommand). Core Guit transparency feature.
+    m_commandList = new QListWidget(this);
+    m_commandList->setSelectionMode(QAbstractItemView::NoSelection);
+    m_commandList->setToolTip(tr("Every Git command Guit has executed this session."));
+    auto *commandDock = new QDockWidget(tr("Git Commands"), this);
+    commandDock->setObjectName(QStringLiteral("GitCommandsDock"));
+    commandDock->setWidget(m_commandList);
+    addDockWidget(Qt::BottomDockWidgetArea, commandDock);
+    commandDock->hide();
+
+    m_toast = new Toast(this);
+
     buildMenus();
     buildStatusBar();
 
@@ -90,13 +111,14 @@ MainWindow::MainWindow(RepositoryController *controller,
     connect(m_controller, &RepositoryController::cloneFinished, this, &MainWindow::onCloneFinished);
     connect(m_controller, &RepositoryController::cloneFailed, this, &MainWindow::onCloneFailed);
 
-    // Operation feedback: status-bar notices for success, error boxes with
-    // Git details for failures. Branch errors are displayed by BranchesPage
+    // Operation feedback: status-bar notices (+toast) for success, error
+    // boxes with Git details for failures, and every executed command into
+    // the Git Commands log. Branch errors are displayed by BranchesPage
     // itself (it may offer force-delete), so they are not duplicated here.
     connect(m_changes, &ChangesController::staged, this,
-            [this](const QString &message, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
     connect(m_changes, &ChangesController::committed, this,
-            [this](const QString &message, const QString &, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command, const QString &) { showNotice(message); logCommand(command); });
     connect(m_changes, &ChangesController::operationFailed, this,
             [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
     connect(m_changes, &ChangesController::headChanged, this, [this]() {
@@ -106,7 +128,7 @@ MainWindow::MainWindow(RepositoryController *controller,
     connect(m_history, &HistoryController::operationFailed, this,
             [this](const QString &reason, const QString &details) { showError(reason, details); });
     connect(m_branches, &BranchController::branchOperationDone, this,
-            [this](const QString &message, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
     connect(m_branches, &BranchController::headChanged, this, [this]() {
         refreshOverview();
         updateStatusBar();
@@ -114,7 +136,7 @@ MainWindow::MainWindow(RepositoryController *controller,
 
     // Remotes: notices, errors, and async network progress with cancel.
     connect(m_remotes, &RemoteController::remoteOperationDone, this,
-            [this](const QString &message, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
     connect(m_remotes, &RemoteController::operationFailed, this,
             [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
     connect(m_remotes, &RemoteController::networkProgress, this, &MainWindow::onNetworkProgress);
@@ -123,14 +145,14 @@ MainWindow::MainWindow(RepositoryController *controller,
 
     // Tags: notices and errors; pushes route to the network-owning RemoteController.
     connect(m_tags, &TagController::tagOperationDone, this,
-            [this](const QString &message, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
     connect(m_tags, &TagController::operationFailed, this,
             [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
     connect(m_tags, &TagController::pushRequested, m_remotes, &RemoteController::pushTag);
 
     // Stash.
     connect(m_stashes, &StashController::stashOperationDone, this,
-            [this](const QString &message, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
     connect(m_stashes, &StashController::operationFailed, this,
             [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
     connect(m_stashes, &StashController::headChanged, this, &MainWindow::onMergeHeadChanged);
@@ -138,11 +160,28 @@ MainWindow::MainWindow(RepositoryController *controller,
     // Merge/rebase/reset/revert/cherry-pick: conflicts switch to the
     // Changes page with the resolution bar; everything refreshes HEAD state.
     connect(m_merge, &MergeController::operationDone, this,
-            [this](const QString &message, const QString &) { showNotice(message); });
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
     connect(m_merge, &MergeController::operationFailed, this,
             [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
     connect(m_merge, &MergeController::conflictStarted, this, &MainWindow::onMergeConflict);
     connect(m_merge, &MergeController::headChanged, this, &MainWindow::onMergeHeadChanged);
+
+    // Repository insight dashboard.
+    connect(m_overview, &OverviewPage::terminalRequested, this, &MainWindow::onOpenTerminal);
+    connect(m_repoInfo, &RepositoryInfoController::operationDone, this,
+            [this](const QString &message, const QString &command) { showNotice(message); logCommand(command); });
+    connect(m_repoInfo, &RepositoryInfoController::operationFailed, this,
+            [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
+    connect(m_repoInfo, &RepositoryInfoController::headChanged, this, &MainWindow::onMergeHeadChanged);
+
+    // Alt+1..7 navigation (documented in Help → Keyboard Shortcuts).
+    for (int i = 0; i <= static_cast<int>(Sidebar::Page::Remotes); ++i) {
+        auto *shortcut = new QShortcut(QKeySequence(QStringLiteral("Alt+%1").arg(i + 1)), this);
+        shortcut->setContext(Qt::ApplicationShortcut);
+        connect(shortcut, &QShortcut::activated, this, [this, i]() {
+            showPage(static_cast<Sidebar::Page>(i));
+        });
+    }
 
     refreshOverview();
     updateStatusBar();
@@ -177,6 +216,16 @@ void MainWindow::buildMenus()
     connect(refreshAction, &QAction::triggered, this, &MainWindow::refreshCurrentPage);
     fileMenu->addAction(refreshAction);
 
+    auto *terminalAction = new QAction(tr("Open &Terminal Here"), this);
+    terminalAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+T")));
+    terminalAction->setToolTip(tr("Open the repository in your terminal."));
+    connect(terminalAction, &QAction::triggered, this, &MainWindow::onOpenTerminal);
+    fileMenu->addAction(terminalAction);
+
+    auto *settingsAction = new QAction(tr("&Settings…"), this);
+    connect(settingsAction, &QAction::triggered, this, &MainWindow::onSettings);
+    fileMenu->addAction(settingsAction);
+
     fileMenu->addSeparator();
     auto *quitAction = new QAction(tr("&Quit"), this);
     quitAction->setShortcut(QKeySequence::Quit);
@@ -204,7 +253,32 @@ void MainWindow::buildMenus()
         connect(action, &QAction::triggered, this, [this, entry]() { onThemeAction(entry.theme); });
     }
 
+    viewMenu->addSeparator();
+    auto *advancedAction = new QAction(tr("&Advanced Mode"), this);
+    advancedAction->setCheckable(true);
+    advancedAction->setChecked(m_settings->advancedMode());
+    advancedAction->setToolTip(tr("Reveal reflog, LFS, submodules, worktrees, and extended facts."));
+    connect(advancedAction, &QAction::toggled, this, &MainWindow::onAdvancedToggled);
+    viewMenu->addAction(advancedAction);
+
+    auto *commandLogAction = new QAction(tr("&Git Command Log"), this);
+    commandLogAction->setCheckable(true);
+    commandLogAction->setToolTip(tr("Show every Git command Guit executes."));
+    connect(commandLogAction, &QAction::toggled, this, [this](bool checked) {
+        for (QDockWidget *dock : findChildren<QDockWidget *>()) {
+            if (dock->objectName() == QStringLiteral("GitCommandsDock"))
+                dock->setVisible(checked);
+        }
+    });
+    viewMenu->addAction(commandLogAction);
+
     auto *helpMenu = menuBar()->addMenu(tr("&Help"));
+    auto *shortcutsAction = new QAction(tr("&Keyboard Shortcuts"), this);
+    connect(shortcutsAction, &QAction::triggered, this, &MainWindow::onShortcuts);
+    helpMenu->addAction(shortcutsAction);
+    auto *conceptsAction = new QAction(tr("&Git Concepts"), this);
+    connect(conceptsAction, &QAction::triggered, this, &MainWindow::onConcepts);
+    helpMenu->addAction(conceptsAction);
     auto *aboutAction = new QAction(tr("&About Guit"), this);
     connect(aboutAction, &QAction::triggered, this, &MainWindow::onAbout);
     helpMenu->addAction(aboutAction);
@@ -271,6 +345,12 @@ void MainWindow::onRepositoryOpened(const QString &rootPath)
     statusBar()->showMessage(tr("Opened %1").arg(rootPath), 5000);
     refreshOverview();
     updateStatusBar();
+    // Tag pushes need current remote names even if Remotes was never shown.
+    m_remotes->refresh();
+    QStringList remoteNames;
+    for (const RemoteInfo &remote : m_remotes->remotes())
+        remoteNames.append(remote.name);
+    m_tagsPage->setRemoteNames(remoteNames);
     refreshCurrentPage();
 }
 
@@ -299,8 +379,8 @@ void MainWindow::onCloneFinished(const QString &directory, const QString &comman
         m_cloneProgress->deleteLater();
         m_cloneProgress = nullptr;
     }
+    logCommand(command);
     statusBar()->showMessage(tr("Cloned into %1").arg(directory), 8000);
-    Q_UNUSED(command);
 }
 
 void MainWindow::onCloneFailed(const QString &reason, const QString &details, const QString &command)
@@ -362,6 +442,7 @@ void MainWindow::onNetworkFinished(const OperationResult &result)
 {
     closeNetworkProgress();
     if (result.ok) {
+        logCommand(result.command);
         statusBar()->showMessage(result.message, 8000);
     } else {
         showError(result.message, result.command);
@@ -439,6 +520,48 @@ void MainWindow::onThemeAction(ThemeManager::Theme theme)
     m_themes->setTheme(theme);
 }
 
+void MainWindow::onOpenTerminal()
+{
+    GitRepository *repository = m_controller->repository();
+    if (!repository->isValid())
+        return;
+    if (!TerminalLauncher::openTerminal(repository->rootPath()))
+        showError(tr("Could not open a terminal for %1.").arg(repository->rootPath()),
+                  tr("Tried %1.").arg(TerminalLauncher::defaultTerminalName()));
+}
+
+void MainWindow::onSettings()
+{
+    SettingsDialog dialog(m_settings, m_themes, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    // Settings apply live in the dialog; pick up Git + mode consequences.
+    m_controller->repository()->client()->setGitExecutableOverride(m_settings->gitExecutableOverride());
+    m_overview->applyMode();
+    refreshOverview();
+    updateStatusBar();
+    refreshCurrentPage();
+}
+
+void MainWindow::onShortcuts()
+{
+    ShortcutsDialog dialog(this);
+    dialog.exec();
+}
+
+void MainWindow::onConcepts()
+{
+    ConceptsDialog dialog(this);
+    dialog.exec();
+}
+
+void MainWindow::onAdvancedToggled(bool advanced)
+{
+    m_settings->setAdvancedMode(advanced);
+    m_overview->applyMode();
+    refreshCurrentPage();
+}
+
 void MainWindow::onAbout()
 {
     QMessageBox::about(this, tr("About Guit"),
@@ -514,6 +637,21 @@ void MainWindow::showError(const QString &reason, const QString &details)
 void MainWindow::showNotice(const QString &message)
 {
     statusBar()->showMessage(message, 8000);
+    if (m_settings->notificationsEnabled())
+        m_toast->showMessage(message);
+}
+
+void MainWindow::logCommand(const QString &command)
+{
+    if (command.trimmed().isEmpty() || m_commandList == nullptr)
+        return;
+    // Skip file-operation pseudo-commands (e.g. .gitignore saves).
+    if (command.trimmed().startsWith(QLatin1Char('#')))
+        return;
+    m_commandList->addItem(command.trimmed());
+    while (m_commandList->count() > 150)
+        delete m_commandList->takeItem(0);
+    m_commandList->scrollToBottom();
 }
 
 } // namespace Guit

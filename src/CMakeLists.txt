@@ -19,8 +19,12 @@ add_library(guit_core STATIC
     git/DiffInfo.cpp
     git/AdvancedModels.h
     git/AdvancedModels.cpp
+    git/GraphLanes.h
+    git/GraphLanes.cpp
     utils/GitCommandFormatter.h
     utils/GitCommandFormatter.cpp
+    utils/TerminalLauncher.h
+    utils/TerminalLauncher.cpp
     utils/Logger.h
     utils/Logger.cpp
     app/AppSettings.h
@@ -43,6 +47,8 @@ add_library(guit_core STATIC
     controllers/StashController.cpp
     controllers/MergeController.h
     controllers/MergeController.cpp
+    controllers/RepositoryInfoController.h
+    controllers/RepositoryInfoController.cpp
     ui/Sidebar.h
     ui/Sidebar.cpp
     ui/DiffViewer.h
@@ -77,6 +83,16 @@ add_library(guit_core STATIC
     ui/RebaseDialog.cpp
     ui/ResetDialog.h
     ui/ResetDialog.cpp
+    ui/GraphDelegate.h
+    ui/GraphDelegate.cpp
+    ui/GitignoreDialog.h
+    ui/GitignoreDialog.cpp
+    ui/WorktreeDialog.h
+    ui/WorktreeDialog.cpp
+    ui/SettingsDialog.h
+    ui/SettingsDialog.cpp
+    ui/HelpDialogs.h
+    ui/Toast.h
     ui/OverviewPage.h
     ui/OverviewPage.cpp
     ui/PlaceholderPage.h

@@ -14,8 +14,10 @@
 #include "../controllers/HistoryController.h"
 #include "../controllers/MergeController.h"
 #include "../controllers/RemoteController.h"
+#include "../controllers/RepositoryInfoController.h"
 #include "../controllers/StashController.h"
 #include "../controllers/TagController.h"
+#include "Toast.h"
 
 #include <QProgressDialog>
 
@@ -42,11 +44,13 @@ public:
                         TagController *tags,
                         StashController *stashes,
                         MergeController *merge,
+                        RepositoryInfoController *repoInfo,
                         AppSettings *settings,
                         ThemeManager *themes,
                         QWidget *parent = nullptr);
 
     void showPage(Sidebar::Page page);
+    void logCommand(const QString &command);
 
 private slots:
     void onOpenRepository();
@@ -68,6 +72,11 @@ private slots:
     void onNetworkFinished(const OperationResult &result);
     void onMergeConflict(const QString &message, const QString &command);
     void onMergeHeadChanged();
+    void onOpenTerminal();
+    void onSettings();
+    void onShortcuts();
+    void onConcepts();
+    void onAdvancedToggled(bool advanced);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -90,6 +99,7 @@ private:
     TagController *m_tags = nullptr;
     StashController *m_stashes = nullptr;
     MergeController *m_merge = nullptr;
+    RepositoryInfoController *m_repoInfo = nullptr;
     AppSettings *m_settings = nullptr;
     ThemeManager *m_themes = nullptr;
 
@@ -110,6 +120,8 @@ private:
     QMenu *m_recentMenu = nullptr;
     QProgressDialog *m_cloneProgress = nullptr;
     QProgressDialog *m_networkProgress = nullptr;
+    QListWidget *m_commandList = nullptr;
+    Toast *m_toast = nullptr;
 };
 
 } // namespace Guit
