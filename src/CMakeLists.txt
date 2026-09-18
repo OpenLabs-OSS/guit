@@ -17,6 +17,8 @@ add_library(guit_core STATIC
     git/GitModels.cpp
     git/DiffInfo.h
     git/DiffInfo.cpp
+    git/AdvancedModels.h
+    git/AdvancedModels.cpp
     utils/GitCommandFormatter.h
     utils/GitCommandFormatter.cpp
     utils/Logger.h
@@ -33,6 +35,14 @@ add_library(guit_core STATIC
     controllers/HistoryController.cpp
     controllers/BranchController.h
     controllers/BranchController.cpp
+    controllers/RemoteController.h
+    controllers/RemoteController.cpp
+    controllers/TagController.h
+    controllers/TagController.cpp
+    controllers/StashController.h
+    controllers/StashController.cpp
+    controllers/MergeController.h
+    controllers/MergeController.cpp
     ui/Sidebar.h
     ui/Sidebar.cpp
     ui/DiffViewer.h
@@ -47,6 +57,26 @@ add_library(guit_core STATIC
     ui/BranchDialog.cpp
     ui/CloneDialog.h
     ui/CloneDialog.cpp
+    ui/RemotesPage.h
+    ui/RemotesPage.cpp
+    ui/RemoteDialog.h
+    ui/RemoteDialog.cpp
+    ui/PushDialog.h
+    ui/PushDialog.cpp
+    ui/TagsPage.h
+    ui/TagsPage.cpp
+    ui/TagDialog.h
+    ui/TagDialog.cpp
+    ui/StashPage.h
+    ui/StashPage.cpp
+    ui/StashDialog.h
+    ui/StashDialog.cpp
+    ui/MergeDialog.h
+    ui/MergeDialog.cpp
+    ui/RebaseDialog.h
+    ui/RebaseDialog.cpp
+    ui/ResetDialog.h
+    ui/ResetDialog.cpp
     ui/OverviewPage.h
     ui/OverviewPage.cpp
     ui/PlaceholderPage.h

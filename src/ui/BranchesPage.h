@@ -2,6 +2,7 @@
 
 #include "DiffViewer.h"
 #include "../controllers/BranchController.h"
+#include "../controllers/MergeController.h"
 
 #include <QComboBox>
 #include <QLabel>
@@ -21,7 +22,7 @@ class BranchesPage : public QWidget
     Q_OBJECT
 
 public:
-    explicit BranchesPage(BranchController *controller, QWidget *parent = nullptr);
+    explicit BranchesPage(BranchController *controller, MergeController *merge, QWidget *parent = nullptr);
 
 public slots:
     void refresh();
@@ -36,12 +37,15 @@ private slots:
     void onRename();
     void onDelete();
     void onCompare();
+    void onMerge();
+    void onRebase();
     void onBranchFailed(const QString &reason, const QString &details, const QString &command);
 
 private:
     QString selectedBranch() const;
 
     BranchController *m_controller = nullptr;
+    MergeController *m_merge = nullptr;
     QListWidget *m_branchList = nullptr;
     QComboBox *m_fromBox = nullptr;
     QComboBox *m_toBox = nullptr;

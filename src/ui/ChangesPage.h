@@ -2,6 +2,7 @@
 
 #include "DiffViewer.h"
 #include "../controllers/ChangesController.h"
+#include "../controllers/MergeController.h"
 
 #include <QCheckBox>
 #include <QLabel>
@@ -22,10 +23,11 @@ class ChangesPage : public QWidget
     Q_OBJECT
 
 public:
-    explicit ChangesPage(ChangesController *controller, QWidget *parent = nullptr);
+    explicit ChangesPage(ChangesController *controller, MergeController *merge, QWidget *parent = nullptr);
 
 public slots:
     void refresh();
+    void refreshConflicts();
 
 private slots:
     void onStatusChanged(const StatusSnapshot &snapshot);
@@ -38,6 +40,12 @@ private slots:
     void onUnstageAll();
     void onDiscard();
     void onCommit();
+    void onConflictState(const OperationState &state);
+    void onUseOurs();
+    void onUseTheirs();
+    void onContinue();
+    void onSkip();
+    void onAbort();
 
 private:
     static QString entryLabel(const FileStatusEntry &entry);
@@ -45,6 +53,10 @@ private:
     QList<FileStatusEntry> selectedEntries(QListWidget *list) const;
 
     ChangesController *m_controller = nullptr;
+    MergeController *m_merge = nullptr;
+    QWidget *m_conflictBar = nullptr;
+    QLabel *m_conflictLabel = nullptr;
+    QPushButton *m_skipButton = nullptr;
     QListWidget *m_unstagedList = nullptr;
     QListWidget *m_stagedList = nullptr;
     QLabel *m_unstagedLabel = nullptr;

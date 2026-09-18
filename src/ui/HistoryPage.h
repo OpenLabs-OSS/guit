@@ -2,6 +2,7 @@
 
 #include "DiffViewer.h"
 #include "../controllers/HistoryController.h"
+#include "../controllers/MergeController.h"
 
 #include <QLabel>
 #include <QListWidget>
@@ -18,7 +19,7 @@ class HistoryPage : public QWidget
     Q_OBJECT
 
 public:
-    explicit HistoryPage(HistoryController *controller, QWidget *parent = nullptr);
+    explicit HistoryPage(HistoryController *controller, MergeController *merge, QWidget *parent = nullptr);
 
 public slots:
     void refresh();
@@ -27,11 +28,16 @@ private slots:
     void onHistoryChanged(const QList<CommitInfo> &commits);
     void onDetailsChanged(const CommitDetails &details);
     void onSelection();
+    void onCherryPick();
+    void onRevert();
+    void onReset();
 
 private:
     static QString commitLabel(const CommitInfo &commit);
+    QString selectedHash() const;
 
     HistoryController *m_controller = nullptr;
+    MergeController *m_merge = nullptr;
     QListWidget *m_commitList = nullptr;
     QLabel *m_detailsLabel = nullptr;
     QListWidget *m_filesList = nullptr;

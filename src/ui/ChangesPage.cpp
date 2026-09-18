@@ -9,9 +9,10 @@
 namespace Guit
 {
 
-ChangesPage::ChangesPage(ChangesController *controller, QWidget *parent)
+ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, QWidget *parent)
     : QWidget(parent)
     , m_controller(controller)
+    , m_merge(merge)
     , m_unstagedList(new QListWidget(this))
     , m_stagedList(new QListWidget(this))
     , m_unstagedLabel(new QLabel(this))
@@ -47,6 +48,35 @@ ChangesPage::ChangesPage(ChangesController *controller, QWidget *parent)
     topBar->addWidget(stageAllButton);
     topBar->addWidget(unstageAllButton);
     topBar->addStretch(1);
+
+    // Conflict lifecycle bar: visible only while a merge/rebase/
+    // cherry-pick/revert is stopped at conflicts. Guides the user through
+    // resolve -> stage -> continue, or abort.
+    m_conflictLabel = new QLabel(this);
+    m_conflictLabel->setWordWrap(true);
+    auto *oursButton = new QPushButton(tr("Use Ours"), this);
+    oursButton->setToolTip(tr("Resolve the selected file with your side (git checkout --ours)."));
+    auto *theirsButton = new QPushButton(tr("Use Theirs"), this);
+    theirsButton->setToolTip(tr("Resolve the selected file with their side (git checkout --theirs)."));
+    auto *continueButton = new QPushButton(tr("Continue"), this);
+    continueButton->setToolTip(tr("Stage resolved files, then continue the operation."));
+    m_skipButton = new QPushButton(tr("Skip"), this);
+    m_skipButton->setToolTip(tr("Skip the current commit (rebase only)."));
+    auto *abortButton = new QPushButton(tr("Abort"), this);
+    abortButton->setToolTip(tr("Give up and restore the pre-operation state."));
+    auto *conflictButtons = new QHBoxLayout();
+    conflictButtons->addWidget(oursButton);
+    conflictButtons->addWidget(theirsButton);
+    conflictButtons->addWidget(continueButton);
+    conflictButtons->addWidget(m_skipButton);
+    conflictButtons->addWidget(abortButton);
+    conflictButtons->addStretch(1);
+    auto *conflictLayout = new QVBoxLayout();
+    conflictLayout->addWidget(m_conflictLabel);
+    conflictLayout->addLayout(conflictButtons);
+    m_conflictBar = new QWidget(this);
+    m_conflictBar->setLayout(conflictLayout);
+    m_conflictBar->setVisible(false);
 
     auto *unstagedButtons = new QHBoxLayout();
     unstagedButtons->addWidget(stageButton);
@@ -98,6 +128,7 @@ ChangesPage::ChangesPage(ChangesController *controller, QWidget *parent)
     mainSplitter->setSizes({300, 700});
 
     auto *layout = new QVBoxLayout(this);
+    layout->addWidget(m_conflictBar);
     layout->addLayout(topBar);
     layout->addWidget(mainSplitter, 1);
 
@@ -121,11 +152,70 @@ ChangesPage::ChangesPage(ChangesController *controller, QWidget *parent)
     connect(m_controller, &ChangesController::staged, this, [this](const QString &, const QString &command) {
         m_commandLabel->setText(tr("Git: %1").arg(command));
     });
+    connect(m_merge, &MergeController::stateChanged, this, &ChangesPage::onConflictState);
+    connect(m_merge, &MergeController::operationDone, this,
+            [this](const QString &, const QString &command) { m_commandLabel->setText(tr("Git: %1").arg(command)); });
+    connect(oursButton, &QPushButton::clicked, this, &ChangesPage::onUseOurs);
+    connect(theirsButton, &QPushButton::clicked, this, &ChangesPage::onUseTheirs);
+    connect(continueButton, &QPushButton::clicked, this, &ChangesPage::onContinue);
+    connect(m_skipButton, &QPushButton::clicked, this, &ChangesPage::onSkip);
+    connect(abortButton, &QPushButton::clicked, this, &ChangesPage::onAbort);
 }
 
 void ChangesPage::refresh()
 {
     m_controller->refresh();
+}
+
+void ChangesPage::refreshConflicts()
+{
+    m_merge->refreshState();
+}
+
+void ChangesPage::onConflictState(const OperationState &state)
+{
+    m_conflictBar->setVisible(state.isActive());
+    if (!state.isActive())
+        return;
+    m_skipButton->setVisible(state.operation == PendingOperation::Rebasing);
+    m_conflictLabel->setText(tr("%1 in progress.\nResolve each conflicted file (edit it, or pick Ours/Theirs), "
+                                "stage the result, then Continue. Abort restores everything.")
+                                 .arg(pendingOperationLabel(state.operation)));
+}
+
+void ChangesPage::onUseOurs()
+{
+    const QStringList paths = selectedPaths(m_unstagedList);
+    if (!paths.isEmpty())
+        m_merge->resolveOurs(paths.constFirst());
+}
+
+void ChangesPage::onUseTheirs()
+{
+    const QStringList paths = selectedPaths(m_unstagedList);
+    if (!paths.isEmpty())
+        m_merge->resolveTheirs(paths.constFirst());
+}
+
+void ChangesPage::onContinue()
+{
+    m_merge->continueOperation();
+}
+
+void ChangesPage::onSkip()
+{
+    m_merge->skipOperation();
+}
+
+void ChangesPage::onAbort()
+{
+    QMessageBox confirm(QMessageBox::Question, tr("Abort operation"),
+                        tr("Abort the in-progress operation and restore the previous state?"),
+                        QMessageBox::No | QMessageBox::Yes, this);
+    confirm.button(QMessageBox::Yes)->setText(tr("Abort"));
+    if (confirm.exec() != QMessageBox::Yes)
+        return;
+    m_merge->abortOperation();
 }
 
 QString ChangesPage::entryLabel(const FileStatusEntry &entry)

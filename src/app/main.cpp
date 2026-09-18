@@ -3,6 +3,10 @@
 #include "../controllers/BranchController.h"
 #include "../controllers/ChangesController.h"
 #include "../controllers/HistoryController.h"
+#include "../controllers/MergeController.h"
+#include "../controllers/RemoteController.h"
+#include "../controllers/StashController.h"
+#include "../controllers/TagController.h"
 #include "../controllers/RepositoryController.h"
 #include "../git/GitRepository.h"
 #include "../ui/MainWindow.h"
@@ -44,7 +48,12 @@ int main(int argc, char *argv[])
     Guit::ChangesController changes(&repository);
     Guit::HistoryController history(&repository);
     Guit::BranchController branches(&repository);
-    Guit::MainWindow window(&controller, &changes, &history, &branches, &settings, &themes);
+    Guit::RemoteController remotes(&repository);
+    Guit::TagController tags(&repository);
+    Guit::StashController stashes(&repository);
+    Guit::MergeController merge(&repository);
+    Guit::MainWindow window(&controller, &changes, &history, &branches, &remotes, &tags, &stashes, &merge,
+                            &settings, &themes);
     window.show();
 
     // Optional: `guit <path>` opens a repository on startup.

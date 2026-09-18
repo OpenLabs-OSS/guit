@@ -1,14 +1,20 @@
 #include "HistoryPage.h"
 
+#include "ResetDialog.h"
+
 #include <QDateTime>
+#include <QHBoxLayout>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QVBoxLayout>
 
 namespace Guit
 {
 
-HistoryPage::HistoryPage(HistoryController *controller, QWidget *parent)
+HistoryPage::HistoryPage(HistoryController *controller, MergeController *merge, QWidget *parent)
     : QWidget(parent)
     , m_controller(controller)
+    , m_merge(merge)
     , m_commitList(new QListWidget(this))
     , m_detailsLabel(new QLabel(this))
     , m_filesList(new QListWidget(this))
@@ -31,12 +37,28 @@ HistoryPage::HistoryPage(HistoryController *controller, QWidget *parent)
     splitter->setStretchFactor(1, 1);
     splitter->setSizes({350, 750});
 
+    auto *cherryButton = new QPushButton(tr("Cherry-pick"), this);
+    cherryButton->setToolTip(tr("Apply the selected commit onto the current branch (git cherry-pick)."));
+    auto *revertButton = new QPushButton(tr("Revert"), this);
+    revertButton->setToolTip(tr("Record a new commit that undoes the selected one (git revert). History is kept."));
+    auto *resetButton = new QPushButton(tr("Reset here…"), this);
+    resetButton->setToolTip(tr("Move the current branch to the selected commit (git reset). Can discard work."));
+    auto *actions = new QHBoxLayout();
+    actions->addWidget(cherryButton);
+    actions->addWidget(revertButton);
+    actions->addWidget(resetButton);
+    actions->addStretch(1);
+
     auto *layout = new QVBoxLayout(this);
-    layout->addWidget(splitter);
+    layout->addWidget(splitter, 1);
+    layout->addLayout(actions);
 
     connect(m_controller, &HistoryController::historyChanged, this, &HistoryPage::onHistoryChanged);
     connect(m_controller, &HistoryController::detailsChanged, this, &HistoryPage::onDetailsChanged);
     connect(m_commitList, &QListWidget::itemSelectionChanged, this, &HistoryPage::onSelection);
+    connect(cherryButton, &QPushButton::clicked, this, &HistoryPage::onCherryPick);
+    connect(revertButton, &QPushButton::clicked, this, &HistoryPage::onRevert);
+    connect(resetButton, &QPushButton::clicked, this, &HistoryPage::onReset);
 }
 
 void HistoryPage::refresh()
@@ -110,6 +132,56 @@ void HistoryPage::onSelection()
     if (selected.isEmpty())
         return;
     m_controller->selectCommit(selected.constFirst()->data(Qt::UserRole).toString());
+}
+
+QString HistoryPage::selectedHash() const
+{
+    const QList<QListWidgetItem *> selected = m_commitList->selectedItems();
+    if (selected.isEmpty())
+        return {};
+    return selected.constFirst()->data(Qt::UserRole).toString();
+}
+
+void HistoryPage::onCherryPick()
+{
+    const QString hash = selectedHash();
+    if (!hash.isEmpty())
+        m_merge->cherryPick(hash);
+}
+
+void HistoryPage::onRevert()
+{
+    const QString hash = selectedHash();
+    if (hash.isEmpty())
+        return;
+    QMessageBox confirm(QMessageBox::Question, tr("Revert commit"),
+                        tr("Record a new commit that undoes %1?").arg(hash.left(7)),
+                        QMessageBox::No | QMessageBox::Yes, this);
+    confirm.setInformativeText(tr("A revert adds history instead of rewriting it — safe for shared branches."));
+    confirm.button(QMessageBox::Yes)->setText(tr("Revert"));
+    if (confirm.exec() != QMessageBox::Yes)
+        return;
+    m_merge->revert(hash);
+}
+
+void HistoryPage::onReset()
+{
+    const QString hash = selectedHash();
+    if (hash.isEmpty())
+        return;
+    ResetDialog dialog(hash.left(7), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    if (dialog.mode() == ResetMode::Hard) {
+        QMessageBox confirm(QMessageBox::Warning, tr("Hard reset"),
+                            tr("Hard-reset the current branch to %1?").arg(hash.left(7)),
+                            QMessageBox::Cancel | QMessageBox::Yes, this);
+        confirm.setInformativeText(tr("All staged and unstaged changes are thrown away. This cannot be undone."));
+        confirm.button(QMessageBox::Yes)->setText(tr("Hard Reset"));
+        if (confirm.exec() != QMessageBox::Yes)
+            return;
+    }
+    m_merge->reset(hash, dialog.mode());
 }
 
 } // namespace Guit

@@ -1,6 +1,8 @@
 #include "BranchesPage.h"
 
 #include "BranchDialog.h"
+#include "MergeDialog.h"
+#include "RebaseDialog.h"
 
 #include <QHBoxLayout>
 #include <QMessageBox>
@@ -9,9 +11,10 @@
 namespace Guit
 {
 
-BranchesPage::BranchesPage(BranchController *controller, QWidget *parent)
+BranchesPage::BranchesPage(BranchController *controller, MergeController *merge, QWidget *parent)
     : QWidget(parent)
     , m_controller(controller)
+    , m_merge(merge)
     , m_branchList(new QListWidget(this))
     , m_fromBox(new QComboBox(this))
     , m_toBox(new QComboBox(this))
@@ -31,6 +34,10 @@ BranchesPage::BranchesPage(BranchController *controller, QWidget *parent)
     auto *renameButton = new QPushButton(tr("Rename…"), this);
     auto *deleteButton = new QPushButton(tr("Delete…"), this);
     deleteButton->setToolTip(tr("Delete the selected branch. Deleting an unmerged branch requires confirmation."));
+    auto *mergeButton = new QPushButton(tr("Merge…"), this);
+    mergeButton->setToolTip(tr("Merge a branch into the current one (git merge)."));
+    auto *rebaseButton = new QPushButton(tr("Rebase onto…"), this);
+    rebaseButton->setToolTip(tr("Replay the current branch on top of another (git rebase). Rewrites history."));
     auto *refreshButton = new QPushButton(tr("Refresh"), this);
     auto *compareButton = new QPushButton(tr("Compare"), this);
     compareButton->setToolTip(tr("Show how far apart the two selected branches are, and their differences."));
@@ -40,6 +47,8 @@ BranchesPage::BranchesPage(BranchController *controller, QWidget *parent)
     actions->addWidget(switchButton);
     actions->addWidget(renameButton);
     actions->addWidget(deleteButton);
+    actions->addWidget(mergeButton);
+    actions->addWidget(rebaseButton);
     actions->addWidget(refreshButton);
     actions->addStretch(1);
 
@@ -83,6 +92,8 @@ BranchesPage::BranchesPage(BranchController *controller, QWidget *parent)
     connect(switchButton, &QPushButton::clicked, this, &BranchesPage::onSwitch);
     connect(renameButton, &QPushButton::clicked, this, &BranchesPage::onRename);
     connect(deleteButton, &QPushButton::clicked, this, &BranchesPage::onDelete);
+    connect(mergeButton, &QPushButton::clicked, this, &BranchesPage::onMerge);
+    connect(rebaseButton, &QPushButton::clicked, this, &BranchesPage::onRebase);
     connect(refreshButton, &QPushButton::clicked, this, &BranchesPage::refresh);
     connect(compareButton, &QPushButton::clicked, this, &BranchesPage::onCompare);
     connect(m_branchList, &QListWidget::itemDoubleClicked, this, &BranchesPage::onSwitch);
@@ -234,6 +245,45 @@ void BranchesPage::onCompare()
     if (m_fromBox->currentText().isEmpty() || m_toBox->currentText().isEmpty())
         return;
     m_controller->compare(m_fromBox->currentText(), m_toBox->currentText());
+}
+
+void BranchesPage::onMerge()
+{
+    QStringList localBranches;
+    QString current;
+    for (const BranchInfo &branch : m_branches) {
+        if (branch.isLocal())
+            localBranches.append(branch.name);
+        if (branch.isCurrent)
+            current = branch.name;
+    }
+    MergeDialog dialog(localBranches, current, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    m_merge->merge(dialog.branch(), dialog.noFastForward());
+}
+
+void BranchesPage::onRebase()
+{
+    QStringList localBranches;
+    QString current;
+    for (const BranchInfo &branch : m_branches) {
+        if (branch.isLocal())
+            localBranches.append(branch.name);
+        if (branch.isCurrent)
+            current = branch.name;
+    }
+    RebaseDialog dialog(localBranches, current, this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    QMessageBox confirm(QMessageBox::Warning, tr("Rebase"),
+                        tr("Replay “%1” onto “%2”?").arg(current, dialog.onto()),
+                        QMessageBox::Cancel | QMessageBox::Yes, this);
+    confirm.setInformativeText(tr("Rebase rewrites history. Only continue for commits you have not shared."));
+    confirm.button(QMessageBox::Yes)->setText(tr("Rebase"));
+    if (confirm.exec() != QMessageBox::Yes)
+        return;
+    m_merge->rebase(dialog.onto());
 }
 
 } // namespace Guit

@@ -24,6 +24,10 @@ MainWindow::MainWindow(RepositoryController *controller,
                        ChangesController *changes,
                        HistoryController *history,
                        BranchController *branches,
+                       RemoteController *remotes,
+                       TagController *tags,
+                       StashController *stashes,
+                       MergeController *merge,
                        AppSettings *settings,
                        ThemeManager *themes,
                        QWidget *parent)
@@ -32,14 +36,21 @@ MainWindow::MainWindow(RepositoryController *controller,
     , m_changes(changes)
     , m_history(history)
     , m_branches(branches)
+    , m_remotes(remotes)
+    , m_tags(tags)
+    , m_stashes(stashes)
+    , m_merge(merge)
     , m_settings(settings)
     , m_themes(themes)
     , m_sidebar(new Sidebar(this))
     , m_stack(new QStackedWidget(this))
     , m_overview(new OverviewPage(this))
-    , m_changesPage(new ChangesPage(changes, this))
-    , m_historyPage(new HistoryPage(history, this))
-    , m_branchesPage(new BranchesPage(branches, this))
+    , m_changesPage(new ChangesPage(changes, merge, this))
+    , m_historyPage(new HistoryPage(history, merge, this))
+    , m_branchesPage(new BranchesPage(branches, merge, this))
+    , m_tagsPage(new TagsPage(tags, {}, this))
+    , m_stashPage(new StashPage(stashes, this))
+    , m_remotesPage(new RemotesPage(remotes, branches, this))
 {
     setWindowTitle(tr("Guit"));
     resize(1100, 700);
@@ -52,18 +63,9 @@ MainWindow::MainWindow(RepositoryController *controller,
     m_stack->addWidget(m_changesPage);
     m_stack->addWidget(m_historyPage);
     m_stack->addWidget(m_branchesPage);
-    m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::Tags),
-                                           Sidebar::pageExplanation(Sidebar::Page::Tags),
-                                           QStringLiteral("git tag --list"),
-                                           tr("Tag management arrives in Milestone 3."), this));
-    m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::Stashes),
-                                           Sidebar::pageExplanation(Sidebar::Page::Stashes),
-                                           QStringLiteral("git stash list"),
-                                           tr("Stash management arrives in Milestone 3."), this));
-    m_stack->addWidget(new PlaceholderPage(Sidebar::pageTitle(Sidebar::Page::Remotes),
-                                           Sidebar::pageExplanation(Sidebar::Page::Remotes),
-                                           QStringLiteral("git remote -v · git fetch origin"),
-                                           tr("Remote operations arrive in Milestone 3."), this));
+    m_stack->addWidget(m_tagsPage);
+    m_stack->addWidget(m_stashPage);
+    m_stack->addWidget(m_remotesPage);
 
     auto *splitter = new QSplitter(this);
     splitter->addWidget(m_sidebar);
@@ -109,6 +111,38 @@ MainWindow::MainWindow(RepositoryController *controller,
         refreshOverview();
         updateStatusBar();
     });
+
+    // Remotes: notices, errors, and async network progress with cancel.
+    connect(m_remotes, &RemoteController::remoteOperationDone, this,
+            [this](const QString &message, const QString &) { showNotice(message); });
+    connect(m_remotes, &RemoteController::operationFailed, this,
+            [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
+    connect(m_remotes, &RemoteController::networkProgress, this, &MainWindow::onNetworkProgress);
+    connect(m_remotes, &RemoteController::networkFinished, this, &MainWindow::onNetworkFinished);
+    connect(m_remotes, &RemoteController::headChanged, this, &MainWindow::onMergeHeadChanged);
+
+    // Tags: notices and errors; pushes route to the network-owning RemoteController.
+    connect(m_tags, &TagController::tagOperationDone, this,
+            [this](const QString &message, const QString &) { showNotice(message); });
+    connect(m_tags, &TagController::operationFailed, this,
+            [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
+    connect(m_tags, &TagController::pushRequested, m_remotes, &RemoteController::pushTag);
+
+    // Stash.
+    connect(m_stashes, &StashController::stashOperationDone, this,
+            [this](const QString &message, const QString &) { showNotice(message); });
+    connect(m_stashes, &StashController::operationFailed, this,
+            [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
+    connect(m_stashes, &StashController::headChanged, this, &MainWindow::onMergeHeadChanged);
+
+    // Merge/rebase/reset/revert/cherry-pick: conflicts switch to the
+    // Changes page with the resolution bar; everything refreshes HEAD state.
+    connect(m_merge, &MergeController::operationDone, this,
+            [this](const QString &message, const QString &) { showNotice(message); });
+    connect(m_merge, &MergeController::operationFailed, this,
+            [this](const QString &reason, const QString &details, const QString &) { showError(reason, details); });
+    connect(m_merge, &MergeController::conflictStarted, this, &MainWindow::onMergeConflict);
+    connect(m_merge, &MergeController::headChanged, this, &MainWindow::onMergeHeadChanged);
 
     refreshOverview();
     updateStatusBar();
@@ -299,10 +333,65 @@ void MainWindow::onRecentChanged()
     connect(clearAction, &QAction::triggered, m_controller, &RepositoryController::clearRecentRepositories);
 }
 
+void MainWindow::showPage(Sidebar::Page page)
+{
+    m_sidebar->setCurrentPage(page);
+}
+
 void MainWindow::onPageSelected(Sidebar::Page page)
 {
     m_stack->setCurrentIndex(static_cast<int>(page));
     refreshCurrentPage();
+}
+
+void MainWindow::onNetworkProgress(const QString &text)
+{
+    if (m_networkProgress == nullptr) {
+        m_networkProgress = new QProgressDialog(tr("Working…"), tr("Cancel"), 0, 0, this);
+        m_networkProgress->setWindowTitle(tr("Remote Operation"));
+        m_networkProgress->setWindowModality(Qt::WindowModal);
+        m_networkProgress->setMinimumDuration(0);
+        connect(m_networkProgress, &QProgressDialog::canceled, m_remotes, &RemoteController::cancelNetwork);
+        m_networkProgress->show();
+    }
+    const QString last = text.trimmed().split(QLatin1Char('\n'), Qt::SkipEmptyParts).constLast();
+    m_networkProgress->setLabelText(last);
+}
+
+void MainWindow::onNetworkFinished(const OperationResult &result)
+{
+    closeNetworkProgress();
+    if (result.ok) {
+        statusBar()->showMessage(result.message, 8000);
+    } else {
+        showError(result.message, result.command);
+    }
+    refreshCurrentPage();
+}
+
+void MainWindow::closeNetworkProgress()
+{
+    if (m_networkProgress != nullptr) {
+        m_networkProgress->close();
+        m_networkProgress->deleteLater();
+        m_networkProgress = nullptr;
+    }
+}
+
+void MainWindow::onMergeConflict(const QString &message, const QString &)
+{
+    // Route to the Changes page where the conflict bar guides resolution.
+    showPage(Sidebar::Page::Changes);
+    m_changesPage->refreshConflicts();
+    statusBar()->showMessage(message, 15000);
+}
+
+void MainWindow::onMergeHeadChanged()
+{
+    refreshOverview();
+    updateStatusBar();
+    refreshCurrentPage();
+    m_changesPage->refreshConflicts();
 }
 
 void MainWindow::refreshCurrentPage()
@@ -311,6 +400,7 @@ void MainWindow::refreshCurrentPage()
         switch (m_sidebar->currentPage()) {
         case Sidebar::Page::Changes:
             m_changesPage->refresh();
+            m_changesPage->refreshConflicts();
             break;
         case Sidebar::Page::History:
             m_historyPage->refresh();
@@ -318,12 +408,24 @@ void MainWindow::refreshCurrentPage()
         case Sidebar::Page::Branches:
             m_branchesPage->refresh();
             break;
+        case Sidebar::Page::Tags:
+            m_tagsPage->refresh();
+            break;
+        case Sidebar::Page::Stashes:
+            m_stashPage->refresh();
+            break;
+        case Sidebar::Page::Remotes: {
+            m_branches->refresh();
+            m_remotes->refresh();
+            QStringList remoteNames;
+            for (const RemoteInfo &remote : m_remotes->remotes())
+                remoteNames.append(remote.name);
+            m_tagsPage->setRemoteNames(remoteNames);
+            m_remotesPage->refresh();
+            break;
+        }
         case Sidebar::Page::Overview:
             refreshOverview();
-            break;
-        case Sidebar::Page::Tags:
-        case Sidebar::Page::Stashes:
-        case Sidebar::Page::Remotes:
             break;
         }
     } else {
