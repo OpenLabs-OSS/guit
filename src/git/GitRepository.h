@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AdvancedModels.h"
 #include "DiffInfo.h"
 #include "FileStatus.h"
 #include "GitClient.h"
@@ -11,6 +12,18 @@
 
 namespace Guit
 {
+
+class AsyncGitProcess;
+
+enum class ResetMode
+{
+    Soft,   // move branch pointer only; index and files untouched
+    Mixed,  // + reset the index; files untouched (default)
+    Hard    // + discard all working-tree changes (destructive)
+};
+
+QString resetModeLabel(ResetMode mode);
+QString resetModeExplanation(ResetMode mode);
 
 // Current status of the working tree and staging area.
 struct StatusSnapshot
@@ -25,10 +38,13 @@ struct StatusSnapshot
 };
 
 // Outcome of a mutating repository operation. `command` is the exact
-// equivalent Git command shown to the user for transparency.
+// equivalent Git command shown to the user for transparency. `conflict`
+// marks the specific case "the operation stopped at conflicts": the UI
+// switches to conflict resolution instead of showing an error box.
 struct OperationResult
 {
     bool ok = false;
+    bool conflict = false;
     QString message;
     QString command;
 };
@@ -82,7 +98,8 @@ public:
     OperationResult stageAll();
     OperationResult unstageAll();
     // Restores paths to HEAD (tracked files) or deletes them (untracked).
-    // Refuses conflicted paths: conflict resolution arrives in Milestone 3.
+    // Refuses conflicted paths: resolve them with resolveWithOurs/Theirs
+    // (or by editing) and stage the result instead.
     OperationResult discardEntries(const QList<FileStatusEntry> &entries);
     CommitResult commit(const QString &subject, const QString &body, bool amend = false);
     QList<FileDiff> diffUnstaged(const QString &path = {}) const;
@@ -105,13 +122,83 @@ public:
     // --- Repository setup ----------------------------------------------
     OperationResult initRepository(const QString &path, const QString &initialBranch = {});
 
+    // --- Milestone 3: remotes ------------------------------------------
+    QList<RemoteInfo> remotes() const;
+    OperationResult addRemote(const QString &name, const QString &url);
+    OperationResult removeRemote(const QString &name);
+    OperationResult renameRemote(const QString &oldName, const QString &newName);
+    OperationResult setRemoteUrl(const QString &name, const QString &url);
+
+    // --- Milestone 3: network operations (asynchronous) ------------------
+    // fetch/pull/push run on AsyncGitProcess so the UI stays responsive.
+    // Progress lines go to networkProgress; the outcome (including user
+    // cancellation and authentication failures surfaced by Git) goes to
+    // networkFinished. Only one network operation runs at a time.
+    void startFetch(const QString &remote, bool prune);
+    void startPull(const QString &remote);
+    void startPush(const QString &remote, const QString &source, bool setUpstream = false, bool force = false,
+                   bool deleteRemote = false);
+    void cancelNetworkOperation();
+    [[nodiscard]] bool isNetworkRunning() const;
+
+    // --- Milestone 3: tags -----------------------------------------------
+    QList<TagInfo> tags() const;
+    // Empty message creates a lightweight tag; otherwise annotated.
+    OperationResult createTag(const QString &name, const QString &message, const QString &target = {});
+    OperationResult deleteTag(const QString &name);
+    CommitDetails showTag(const QString &name) const;
+
+    // --- Milestone 3: stash -----------------------------------------------
+    QList<StashInfo> stashList() const;
+    OperationResult stashPush(const QString &message, bool includeUntracked);
+    OperationResult stashApply(const QString &stashRef);
+    OperationResult stashPop(const QString &stashRef);
+    OperationResult stashDrop(const QString &stashRef);
+    OperationResult stashClear();
+    QList<FileDiff> stashShow(const QString &stashRef) const;
+
+    // --- Milestone 3: merge -------------------------------------------------
+    // A conflicting merge succeeds at the Git level but leaves MERGE_HEAD
+    // behind: the result reports ok=false with a conflict message so the UI
+    // can switch to conflict resolution instead of showing an error.
+    OperationResult mergeBranch(const QString &name, bool noFastForward);
+    OperationResult mergeAbort();
+    OperationResult mergeContinue();
+
+    // --- Milestone 3: rebase --------------------------------------------------
+    OperationResult rebaseOnto(const QString &branch);
+    OperationResult rebaseContinue();
+    OperationResult rebaseSkip();
+    OperationResult rebaseAbort();
+
+    // --- Milestone 3: reset / revert / cherry-pick ------------------------------
+    OperationResult resetTo(const QString &target, ResetMode mode);
+    OperationResult revertCommit(const QString &hash);
+    OperationResult revertContinue();
+    OperationResult revertAbort();
+    OperationResult cherryPick(const QString &hash);
+    OperationResult cherryPickContinue();
+    OperationResult cherryPickAbort();
+
+    // --- Milestone 3: operation state + conflict resolution ----------------------
+    // Reads .git state so operations started outside Guit are detected too.
+    OperationState operationState() const;
+    OperationResult resolveWithOurs(const QString &path);
+    OperationResult resolveWithTheirs(const QString &path);
+
 signals:
     void repositoryChanged();
     void repositoryClosed();
     void openFailed(const QString &reason, const QString &details);
+    void networkProgress(const QString &text);
+    void networkFinished(const Guit::OperationResult &result);
 
 private:
+    void startNetwork(const QStringList &args, const QString &successMessage);
     GitClient *m_client = nullptr;
+    AsyncGitProcess *m_network = nullptr;
+    QString m_networkCommand;
+    QString m_networkSuccessMessage;
     bool m_valid = false;
     bool m_bare = false;
     QString m_rootPath;
@@ -120,3 +207,7 @@ private:
 };
 
 } // namespace Guit
+
+// Registered so OperationResult can travel through signals (and QSignalSpy)
+// across threads and test boundaries.
+Q_DECLARE_METATYPE(Guit::OperationResult)

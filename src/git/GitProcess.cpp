@@ -80,6 +80,10 @@ class AsyncGitProcess::Private
 public:
     QProcess *process = nullptr;
     bool running = false;
+    // Progress handlers consume the buffers as data arrives, so accumulate
+    // everything: failure messages must survive in the final result.
+    QString standardOutput;
+    QString standardError;
 };
 
 AsyncGitProcess::AsyncGitProcess(QObject *parent)
@@ -107,10 +111,14 @@ void AsyncGitProcess::start(const QString &executable,
         d->process->setWorkingDirectory(workingDirectory);
 
     connect(d->process, &QProcess::readyReadStandardOutput, this, [this]() {
-        emit progress(QString::fromUtf8(d->process->readAllStandardOutput()));
+        const QString chunk = QString::fromUtf8(d->process->readAllStandardOutput());
+        d->standardOutput.append(chunk);
+        emit progress(chunk);
     });
     connect(d->process, &QProcess::readyReadStandardError, this, [this]() {
-        emit progress(QString::fromUtf8(d->process->readAllStandardError()));
+        const QString chunk = QString::fromUtf8(d->process->readAllStandardError());
+        d->standardError.append(chunk);
+        emit progress(chunk);
     });
     connect(d->process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this](int exitCode, QProcess::ExitStatus exitStatus) {
@@ -119,8 +127,9 @@ void AsyncGitProcess::start(const QString &executable,
                 GitProcessResult result;
                 result.started = true;
                 result.exitCode = exitCode;
-                result.standardOutput = QString::fromUtf8(d->process->readAllStandardOutput());
-                result.standardError = QString::fromUtf8(d->process->readAllStandardError()).trimmed();
+                result.standardOutput = d->standardOutput + QString::fromUtf8(d->process->readAllStandardOutput());
+                result.standardError =
+                    (d->standardError + QString::fromUtf8(d->process->readAllStandardError())).trimmed();
                 if (exitStatus != QProcess::NormalExit) {
                     result.error = GitError::Cancelled;
                     result.errorMessage = QStringLiteral("The Git process did not exit normally.");
