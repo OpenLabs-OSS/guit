@@ -136,6 +136,24 @@ private slots:
         QVERIFY(repository.open(repo.path()));
         QVERIFY(repository.log().isEmpty());
     }
+
+    void historyExcludesStashCommits()
+    {
+        GuitTest::TempRepo repo;
+        repo.writeFile(QStringLiteral("a.txt"), QStringLiteral("a\n"));
+        repo.commit(QStringLiteral("First"));
+        repo.writeFile(QStringLiteral("a.txt"), QStringLiteral("a\nchanged\n"));
+
+        GitRepository repository;
+        QVERIFY(repository.open(repo.path()));
+        QVERIFY(repository.stashPush(QStringLiteral("shelved"), false).ok);
+
+        // The stash exists, but normal history shows only real commits.
+        QCOMPARE(repository.stashList().size(), 1);
+        const QList<CommitInfo> history = repository.logAll();
+        QCOMPARE(history.size(), 1);
+        QCOMPARE(history.constFirst().subject, QStringLiteral("First"));
+    }
 };
 
 QTEST_MAIN(TestHistory)

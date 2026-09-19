@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -43,6 +44,7 @@ public:
 public slots:
     void refresh();
     void applyMode();
+    void setLoading(bool loading);
 
 signals:
     void openRequested();
@@ -89,6 +91,8 @@ private:
     QListWidget *m_worktreeList = nullptr;
     QGroupBox *m_reflogBox = nullptr;
     QListWidget *m_reflogList = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
+    QList<QPushButton *> m_actionButtons;
     QString m_gitignoreContent;
 };
 

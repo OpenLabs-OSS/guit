@@ -9,6 +9,8 @@
 #include <QLineEdit>
 #include <QListView>
 #include <QListWidget>
+#include <QProgressBar>
+#include <QPushButton>
 #include <QSplitter>
 #include <QStandardItemModel>
 #include <QWidget>
@@ -41,6 +43,9 @@ private slots:
     void onCherryPick();
     void onRevert();
     void onReset();
+    void setLoading(bool loading);
+    void setMergeLoading(bool loading);
+    void updateLoading();
 
 private:
     void showCommits(const QList<CommitInfo> &commits, bool isSearchResult, const QString &query = {});
@@ -56,6 +61,10 @@ private:
     QLabel *m_detailsLabel = nullptr;
     QListWidget *m_filesList = nullptr;
     DiffViewer *m_diff = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
+    QList<QPushButton *> m_actionButtons;
+    bool m_historyBusy = false;
+    bool m_mergeBusy = false;
     QList<CommitInfo> m_commits;
 };
 

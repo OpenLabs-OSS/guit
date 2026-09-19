@@ -24,14 +24,14 @@ QList<GraphRow> GraphLanes::compute(const QList<CommitInfo> &commits)
     if (commits.isEmpty())
         return rows;
 
-    // Row index of every commit for parent lookups. Parents beyond the
-    // loaded window (or otherwise unknown) target the next row: their
-    // lines run off the bottom instead of breaking the layout.
+    // Row index of every commit for parent lookups. A parent outside the
+    // loaded window terminates its line at this row instead of running
+    // into another commit's row.
     QMap<QString, int> rowOf;
     for (int i = 0; i < commits.size(); ++i)
         rowOf.insert(commits.at(i).hash, i);
     const auto targetOf = [&](const QString &hash, int row) -> int {
-        return rowOf.contains(hash) ? rowOf.value(hash) - row : 1;
+        return rowOf.value(hash, row + 1) - row;
     };
 
     // Active lanes, one expected commit hash each. Finished lanes keep
@@ -70,18 +70,23 @@ QList<GraphRow> GraphLanes::compute(const QList<CommitInfo> &commits)
         } else {
             const QString first = parents.constFirst();
             const int firstLane = lanes.indexOf(first);
-            if (firstLane < 0) {
+            if (firstLane < 0 && rowOf.contains(first)) {
                 lanes[lane] = first; // straight continuation
                 graph.segments.append(GraphSegment{lane, 0, lane, targetOf(first, row)});
+            } else if (firstLane < 0) {
+                lanes[lane].clear(); // parent outside the window: terminate
             } else if (firstLane == lane) {
                 graph.segments.append(GraphSegment{lane, 0, lane, targetOf(first, row)});
             } else {
                 lanes[lane].clear(); // join into the parent's lane
                 graph.segments.append(GraphSegment{lane, 0, firstLane, targetOf(first, row)});
             }
-            // Extra parents fork new (or reuse existing) lanes.
+            // Extra parents fork new (or reuse existing) lanes; parents
+            // outside the window terminate instead of forking.
             for (int p = 1; p < parents.size(); ++p) {
                 const QString &parent = parents.at(p);
+                if (!rowOf.contains(parent))
+                    continue;
                 const int parentLane = acquireLane(parent);
                 graph.segments.append(GraphSegment{lane, 0, parentLane, targetOf(parent, row)});
             }

@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QWidget>
 
@@ -34,6 +35,7 @@ private slots:
     void onInspect();
     void onDelete();
     void onPush();
+    void setLoading(bool loading);
 
 private:
     QString selectedTag() const;
@@ -45,6 +47,8 @@ private:
     DiffViewer *m_diff = nullptr;
     QLabel *m_commandLabel = nullptr;
     QComboBox *m_remoteBox = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
+    QList<QPushButton *> m_actionButtons;
     QList<TagInfo> m_tags;
 };
 

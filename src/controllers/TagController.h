@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/AdvancedModels.h"
 #include "../git/GitModels.h"
 #include "../git/GitRepository.h"
@@ -13,7 +14,7 @@ namespace Guit
 // Coordinates local tag management. Pushing a tag needs the network layer,
 // so TagController emits pushRequested and MainWindow routes it to the
 // RemoteController that owns network operations.
-class TagController : public QObject
+class TagController : public AsyncController
 {
     Q_OBJECT
 

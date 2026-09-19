@@ -25,11 +25,17 @@ HistoryPage::HistoryPage(HistoryController *controller, MergeController *merge, 
     , m_detailsLabel(new QLabel(this))
     , m_filesList(new QListWidget(this))
     , m_diff(new DiffViewer(this))
+    , m_loadingBar(new QProgressBar(this))
 {
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
     m_commitList->setModel(m_model);
     m_commitList->setItemDelegate(m_delegate);
     m_commitList->setSelectionMode(QAbstractItemView::SingleSelection);
     m_commitList->setUniformItemSizes(true);
+    m_filesList->setUniformItemSizes(true);
     m_searchBox->setPlaceholderText(tr("Search message, author, or hash…"));
     m_searchBox->setClearButtonEnabled(true);
     m_searchBox->setToolTip(tr("Filters the loaded history. Searches commit messages, authors, and hashes."));
@@ -81,6 +87,7 @@ HistoryPage::HistoryPage(HistoryController *controller, MergeController *merge, 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
     layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_loadingBar);
     layout->addWidget(splitter, 1);
     layout->addLayout(actions);
 
@@ -94,6 +101,29 @@ HistoryPage::HistoryPage(HistoryController *controller, MergeController *merge, 
     connect(cherryButton, &QPushButton::clicked, this, &HistoryPage::onCherryPick);
     connect(revertButton, &QPushButton::clicked, this, &HistoryPage::onRevert);
     connect(resetButton, &QPushButton::clicked, this, &HistoryPage::onReset);
+    connect(m_controller, &HistoryController::loadingChanged, this, &HistoryPage::setLoading);
+    connect(m_merge, &MergeController::loadingChanged, this, &HistoryPage::setMergeLoading);
+    m_actionButtons = {searchButton, clearButton, cherryButton, revertButton, resetButton};
+}
+
+void HistoryPage::setLoading(bool loading)
+{
+    m_historyBusy = loading;
+    updateLoading();
+}
+
+void HistoryPage::setMergeLoading(bool loading)
+{
+    m_mergeBusy = loading;
+    updateLoading();
+}
+
+void HistoryPage::updateLoading()
+{
+    const bool busy = m_historyBusy || m_mergeBusy;
+    m_loadingBar->setVisible(busy);
+    for (QPushButton *button : m_actionButtons)
+        button->setEnabled(!busy);
 }
 
 void HistoryPage::refresh()

@@ -26,6 +26,10 @@ Sidebar::Sidebar(QWidget *parent)
     m_list->setFixedWidth(Theme::sidebarWidth());
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Single-line navigation rows with identical metrics: uniform sizes make
+    // the initial layout deterministic (no per-item measurement race with
+    // the stylesheet on first show) and scrolling cheaper.
+    m_list->setUniformItemSizes(true);
 
     addItem(Page::Overview);
     addItem(Page::Changes);

@@ -26,7 +26,14 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     , m_amend(new QCheckBox(tr("Amend previous commit"), this))
     , m_commitButton(new QPushButton(tr("Commit"), this))
     , m_commandLabel(new QLabel(this))
+    , m_loadingBar(new QProgressBar(this))
 {
+    // Thin busy indicator: visible only while Git work runs. Navigation
+    // stays responsive; only this page's action buttons are disabled.
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
     m_subject->setPlaceholderText(tr("Commit message — a short summary of the change"));
     m_subject->setToolTip(tr("Required. Good messages explain what changed and why."));
     m_body->setPlaceholderText(tr("Extended description (optional)"));
@@ -44,6 +51,7 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
         list->setHeaderLabels({tr("Status"), tr("File")});
         list->setHeaderHidden(true);
         list->setRootIsDecorated(false);
+        list->setUniformRowHeights(true);
         list->setSelectionMode(QAbstractItemView::ExtendedSelection);
         list->setAlternatingRowColors(true);
         list->setSortingEnabled(false);
@@ -150,6 +158,7 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
     layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_loadingBar);
     layout->addWidget(m_conflictBar);
     layout->addLayout(topBar);
     layout->addWidget(mainSplitter, 1);
@@ -182,9 +191,33 @@ ChangesPage::ChangesPage(ChangesController *controller, MergeController *merge, 
     connect(continueButton, &QPushButton::clicked, this, &ChangesPage::onContinue);
     connect(m_skipButton, &QPushButton::clicked, this, &ChangesPage::onSkip);
     connect(abortButton, &QPushButton::clicked, this, &ChangesPage::onAbort);
+    connect(m_controller, &ChangesController::loadingChanged, this, &ChangesPage::setLoading);
+    connect(m_merge, &MergeController::loadingChanged, this, &ChangesPage::setMergeLoading);
+    m_actionButtons = {stageButton, discardButton, unstageButton, stageAllButton,
+                       unstageAllButton, refreshButton, m_commitButton};
     auto *commitShortcut = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Return")), this);
     commitShortcut->setContext(Qt::WidgetWithChildrenShortcut);
     connect(commitShortcut, &QShortcut::activated, this, &ChangesPage::onCommit);
+}
+
+void ChangesPage::setLoading(bool loading)
+{
+    m_changesBusy = loading;
+    updateLoading();
+}
+
+void ChangesPage::setMergeLoading(bool loading)
+{
+    m_mergeBusy = loading;
+    updateLoading();
+}
+
+void ChangesPage::updateLoading()
+{
+    const bool busy = m_changesBusy || m_mergeBusy;
+    m_loadingBar->setVisible(busy);
+    for (QPushButton *button : m_actionButtons)
+        button->setEnabled(!busy && (button != m_commitButton || !m_staged.isEmpty()));
 }
 
 void ChangesPage::refresh()

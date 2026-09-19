@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/AdvancedModels.h"
 #include "../git/GitRepository.h"
 
@@ -11,7 +12,7 @@ namespace Guit
 
 // Coordinates repository insight and maintenance: facts dashboard, LFS,
 // submodules, worktrees, reflog, and the .gitignore helper.
-class RepositoryInfoController : public QObject
+class RepositoryInfoController : public AsyncController
 {
     Q_OBJECT
 
@@ -40,7 +41,16 @@ signals:
     void headChanged();
 
 private:
-    void handleResult(const OperationResult &result);
+    struct InfoBundle
+    {
+        RepoInfo info;
+        LfsInfo lfs;
+        QList<SubmoduleInfo> submodules;
+        QList<WorktreeInfo> worktrees;
+        QList<ReflogEntry> reflog;
+        QString gitignore;
+    };
+    void reloadAfter(const OperationResult &result);
 
     GitRepository *m_repository = nullptr;
 };

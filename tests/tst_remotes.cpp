@@ -94,7 +94,9 @@ private slots:
         QVERIFY(sawTracking);
 
         // Base local main on the fetched branch (fresh TempRepos start
-        // unborn) and track it, so a bare `git pull` knows what to merge.
+        // unborn; `git switch origin/main` would refuse because the
+        // same-named unborn branch already exists — correct Git behavior,
+        // so reset explicitly) and track it for bare `git pull`.
         // A commit lands on the server first so pull has something to do.
         work.runOrFail({QStringLiteral("checkout"), QStringLiteral("-B"), QStringLiteral("main"),
                         QStringLiteral("origin/main")});

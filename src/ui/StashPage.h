@@ -5,6 +5,7 @@
 
 #include <QLabel>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QWidget>
 
@@ -32,6 +33,7 @@ private slots:
     void onDrop();
     void onClear();
     void onSelection();
+    void setLoading(bool loading);
 
 private:
     QString selectedRef() const;
@@ -41,6 +43,8 @@ private:
     QLabel *m_infoLabel = nullptr;
     DiffViewer *m_diff = nullptr;
     QLabel *m_commandLabel = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
+    QList<QPushButton *> m_actionButtons;
 };
 
 } // namespace Guit

@@ -35,7 +35,12 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
     , m_worktreeList(new QListWidget(m_worktreeBox))
     , m_reflogBox(new QGroupBox(tr("Reflog (advanced)"), this))
     , m_reflogList(new QListWidget(m_reflogBox))
+    , m_loadingBar(new QProgressBar(this))
 {
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
     m_gitBanner->setWordWrap(true);
     m_repoTitle->setWordWrap(true);
     m_repoDetails->setWordWrap(true);
@@ -47,6 +52,8 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     Theme::applyMono(m_commandLabel);
     m_reflogList->setFont(Theme::monoFont());
+    for (QListWidget *list : {m_recentList, m_submoduleList, m_worktreeList, m_reflogList})
+        list->setUniformItemSizes(true);
 
     Theme::applyTitle(m_repoTitle);
     Theme::applySection(m_recentLabel);
@@ -125,6 +132,8 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
     scroll->setFrameShape(QFrame::NoFrame);
 
     auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(m_loadingBar);
     layout->addWidget(scroll);
 
     connect(m_openButton, &QPushButton::clicked, this, &OverviewPage::openRequested);
@@ -142,8 +151,17 @@ OverviewPage::OverviewPage(RepositoryInfoController *info, AppSettings *settings
     connect(subSyncButton, &QPushButton::clicked, this, &OverviewPage::onSyncSubmodules);
     connect(wtAddButton, &QPushButton::clicked, this, &OverviewPage::onAddWorktree);
     connect(wtRemoveButton, &QPushButton::clicked, this, &OverviewPage::onRemoveWorktree);
+    connect(m_info, &RepositoryInfoController::loadingChanged, this, &OverviewPage::setLoading);
+    m_actionButtons = {lfsTrackButton, subUpdateButton, subSyncButton, wtAddButton, wtRemoveButton};
 
     applyMode();
+}
+
+void OverviewPage::setLoading(bool loading)
+{
+    m_loadingBar->setVisible(loading);
+    for (QPushButton *button : m_actionButtons)
+        button->setEnabled(!loading);
 }
 
 void OverviewPage::setData(const Data &data)

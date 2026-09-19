@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTextEdit>
@@ -48,6 +49,9 @@ private slots:
     void onContinue();
     void onSkip();
     void onAbort();
+    void setLoading(bool loading);
+    void setMergeLoading(bool loading);
+    void updateLoading();
 
 private:
     // Short status code ("M", "A", "D", "R", "??", ...) with its color.
@@ -71,6 +75,10 @@ private:
     QCheckBox *m_amend = nullptr;
     QPushButton *m_commitButton = nullptr;
     QLabel *m_commandLabel = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
+    QList<QPushButton *> m_actionButtons;
+    bool m_changesBusy = false;
+    bool m_mergeBusy = false;
     QList<FileStatusEntry> m_unstaged;
     QList<FileStatusEntry> m_staged;
 };

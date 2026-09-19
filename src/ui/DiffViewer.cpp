@@ -150,6 +150,7 @@ DiffViewer::DiffViewer(QWidget *parent)
     , m_highlighter(new DiffHighlighter(m_diffText->document()))
 {
     m_fileList->setAlternatingRowColors(true);
+    m_fileList->setUniformItemSizes(true);
 
     auto *splitter = new QSplitter(Qt::Vertical, this);
     splitter->addWidget(m_fileList);

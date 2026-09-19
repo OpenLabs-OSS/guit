@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/DiffInfo.h"
 #include "../git/FileStatus.h"
 #include "../git/GitModels.h"
@@ -13,8 +14,11 @@ namespace Guit
 {
 
 // Coordinates the Changes page: status refresh, staging, discarding, diff
-// loading, and committing. Emits results; widgets only render state.
-class ChangesController : public QObject
+// loading, and committing. Git reads AND mutations run on the repository's
+// serial background queue so the GUI thread never blocks; results return
+// through signals. loadingChanged drives the page's loading indicator and
+// disables action buttons while work runs, preventing conflicting ops.
+class ChangesController : public AsyncController
 {
     Q_OBJECT
 
@@ -49,7 +53,7 @@ signals:
     void headChanged();
 
 private:
-    void handleResult(const OperationResult &result, bool isCommit = false, const QString &hash = {});
+    void reloadAfter(const OperationResult &result, bool isCommit, const QString &hash);
 
     GitRepository *m_repository = nullptr;
     StatusSnapshot m_status;

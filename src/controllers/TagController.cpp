@@ -4,42 +4,64 @@ namespace Guit
 {
 
 TagController::TagController(GitRepository *repository, QObject *parent)
-    : QObject(parent)
+    : AsyncController(parent)
     , m_repository(repository)
 {
 }
 
 void TagController::refresh()
 {
-    m_tags = m_repository->tags();
-    emit tagsChanged(m_tags);
+    GitRepository *repository = m_repository;
+    submit<QList<TagInfo>>([repository]() { return repository->tags(); },
+                           [this](const QList<TagInfo> &tags) {
+                               m_tags = tags;
+                               emit tagsChanged(m_tags);
+                               emit loadingChanged(false);
+                           });
 }
 
 void TagController::create(const QString &name, const QString &message, const QString &target)
 {
-    const OperationResult result = m_repository->createTag(name, message, target);
-    refresh();
-    if (result.ok)
-        emit tagOperationDone(result.message, result.command);
-    else
-        emit operationFailed(result.message, {}, result.command);
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, name, message, target]() {
+        return repository->createTag(name, message, target);
+    },
+                            [this](const OperationResult &result) {
+                                if (!result.ok) {
+                                    emit loadingChanged(false);
+                                    emit operationFailed(result.message, {}, result.command);
+                                    return;
+                                }
+                                refresh();
+                                emit tagOperationDone(result.message, result.command);
+                            });
 }
 
 void TagController::remove(const QString &name)
 {
-    const OperationResult result = m_repository->deleteTag(name);
-    refresh();
-    if (result.ok)
-        emit tagOperationDone(result.message, result.command);
-    else
-        emit operationFailed(result.message, {}, result.command);
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, name]() { return repository->deleteTag(name); },
+                            [this](const OperationResult &result) {
+                                if (!result.ok) {
+                                    emit loadingChanged(false);
+                                    emit operationFailed(result.message, {}, result.command);
+                                    return;
+                                }
+                                refresh();
+                                emit tagOperationDone(result.message, result.command);
+                            });
 }
 
 void TagController::inspect(const QString &name)
 {
     for (const TagInfo &tag : m_tags) {
         if (tag.name == name) {
-            emit tagDetails(tag, m_repository->showTag(name));
+            GitRepository *repository = m_repository;
+            submit<CommitDetails>([repository, name]() { return repository->showTag(name); },
+                                  [this, tag](const CommitDetails &details) {
+                                      emit tagDetails(tag, details);
+                                      emit loadingChanged(false);
+                                  });
             return;
         }
     }

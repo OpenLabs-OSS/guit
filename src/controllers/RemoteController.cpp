@@ -4,7 +4,7 @@ namespace Guit
 {
 
 RemoteController::RemoteController(GitRepository *repository, QObject *parent)
-    : QObject(parent)
+    : AsyncController(parent)
     , m_repository(repository)
 {
     connect(m_repository, &GitRepository::networkProgress, this, &RemoteController::networkProgress);
@@ -23,28 +23,41 @@ RemoteController::RemoteController(GitRepository *repository, QObject *parent)
 
 void RemoteController::refresh()
 {
-    m_remotes = m_repository->remotes();
-    emit remotesChanged(m_remotes);
+    GitRepository *repository = m_repository;
+    submit<QList<RemoteInfo>>([repository]() { return repository->remotes(); },
+                              [this](const QList<RemoteInfo> &remotes) {
+                                  m_remotes = remotes;
+                                  emit remotesChanged(m_remotes);
+                                  emit loadingChanged(false);
+                              });
 }
 
 void RemoteController::add(const QString &name, const QString &url)
 {
-    handleResult(m_repository->addRemote(name, url));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, name, url]() { return repository->addRemote(name, url); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RemoteController::remove(const QString &name)
 {
-    handleResult(m_repository->removeRemote(name));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, name]() { return repository->removeRemote(name); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RemoteController::rename(const QString &oldName, const QString &newName)
 {
-    handleResult(m_repository->renameRemote(oldName, newName));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, oldName, newName]() { return repository->renameRemote(oldName, newName); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RemoteController::setUrl(const QString &name, const QString &url)
 {
-    handleResult(m_repository->setRemoteUrl(name, url));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, name, url]() { return repository->setRemoteUrl(name, url); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RemoteController::fetch(const QString &remote, bool prune)
@@ -77,13 +90,21 @@ void RemoteController::cancelNetwork()
     m_repository->cancelNetworkOperation();
 }
 
-void RemoteController::handleResult(const OperationResult &result)
+void RemoteController::reloadAfter(const OperationResult &result)
 {
-    refresh();
-    if (result.ok)
-        emit remoteOperationDone(result.message, result.command);
-    else
+    if (!result.ok) {
+        emit loadingChanged(false);
         emit operationFailed(result.message, {}, result.command);
+        return;
+    }
+    GitRepository *repository = m_repository;
+    submit<QList<RemoteInfo>>([repository]() { return repository->remotes(); },
+                              [this, result](const QList<RemoteInfo> &remotes) {
+                                  m_remotes = remotes;
+                                  emit remotesChanged(m_remotes);
+                                  emit remoteOperationDone(result.message, result.command);
+                                  emit loadingChanged(false);
+                              });
 }
 
 } // namespace Guit

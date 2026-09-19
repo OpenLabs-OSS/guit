@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QWidget>
 
@@ -38,6 +39,7 @@ private slots:
     void onDeleteRemoteBranch();
     void updateDetails();
     void setNetworkActive(bool active);
+    void setLoading(bool loading);
 
 private:
     QString selectedRemote() const;
@@ -53,6 +55,7 @@ private:
     QPushButton *m_pullButton = nullptr;
     QPushButton *m_pushButton = nullptr;
     QPushButton *m_deleteButton = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
     QList<RemoteInfo> m_remotes;
 };
 

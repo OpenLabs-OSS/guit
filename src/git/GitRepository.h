@@ -7,9 +7,11 @@
 #include "GitModels.h"
 
 #include <QMap>
+#include <QMutex>
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QThreadPool>
 
 namespace Guit
 {
@@ -55,6 +57,17 @@ struct CommitResult : OperationResult
     QString commitHash;
 };
 
+// Immutable snapshot of where a repository lives. Readers copy this under
+// the mutex and then run Git without holding any lock, so the GUI thread
+// never blocks on process execution.
+struct RepoLocation
+{
+    bool valid = false;
+    QString rootPath;
+    QString gitDir;
+    bool bare = false;
+};
+
 // Current HEAD state of an open repository.
 struct HeadInfo
 {
@@ -82,11 +95,11 @@ public:
     bool open(const QString &path);
     void close();
 
-    [[nodiscard]] bool isValid() const { return m_valid; }
-    [[nodiscard]] QString rootPath() const { return m_rootPath; }
-    [[nodiscard]] QString gitDir() const { return m_gitDir; }
-    [[nodiscard]] bool isBare() const { return m_bare; }
-    [[nodiscard]] HeadInfo head() const { return m_head; }
+    [[nodiscard]] bool isValid() const;
+    [[nodiscard]] QString rootPath() const;
+    [[nodiscard]] QString gitDir() const;
+    [[nodiscard]] bool isBare() const;
+    [[nodiscard]] HeadInfo head() const;
 
     bool refreshHead();
 
@@ -223,12 +236,24 @@ signals:
     void networkProgress(const QString &text);
     void networkFinished(const Guit::OperationResult &result);
 
+public:
+    // Serial background queue for Git reads: one thread, so concurrent
+    // operations never fight over the repository's index.lock, while the
+    // GUI thread stays responsive. Results return via QFutureWatcher on
+    // the caller's thread. Only GitRepository readers run here; the async
+    // network process and open/close stay on the GUI thread.
+    static QThreadPool *backgroundPool();
+
 private:
     void startNetwork(const QStringList &args, const QString &successMessage);
+    RepoLocation snapshotLocation() const;
+    void storeHead(const HeadInfo &head);
+
     GitClient *m_client = nullptr;
     AsyncGitProcess *m_network = nullptr;
     QString m_networkCommand;
     QString m_networkSuccessMessage;
+    mutable QRecursiveMutex m_mutex;
     bool m_valid = false;
     bool m_bare = false;
     QString m_rootPath;

@@ -130,6 +130,8 @@ int main(int argc, char *argv[])
     QString outDir = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QStringLiteral("uisnap");
     QDir().mkpath(outDir);
 
+    const bool firstPaintOnly = (argc > 2 && QString::fromLocal8Bit(argv[2]) == QStringLiteral("--first-paint"));
+
     const QString repoPath = makeFixture();
     mark(QStringLiteral("fixture-done"));
     {
@@ -164,6 +166,14 @@ int main(int argc, char *argv[])
 
         Guit::MainWindow window(&controller, &changes, &history, &branches, &remotes, &tags, &stashes, &merge,
                                 &repoInfo, &settings, &themes);
+        if (firstPaintOnly) {
+            // Bare first launch: no repo, default size, grab immediately.
+            window.show();
+            QApplication::processEvents();
+            window.grab().save(QDir(outDir).filePath(QStringLiteral("firstpaint-%1.png").arg(entry.first)));
+            window.hide();
+            continue;
+        }
         window.resize(1280, 800);
         controller.openRepository(repoPath);
         mark(QStringLiteral("opened-") + entry.first);

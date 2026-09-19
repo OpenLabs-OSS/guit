@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/AdvancedModels.h"
 #include "../git/GitRepository.h"
 
@@ -14,7 +15,9 @@ namespace Guit
 // conflict-resolution lifecycle (resolve files -> stage -> continue, or
 // abort). Reset never conflicts but lives here because it is equally
 // destructive and deserves the same confirmation discipline.
-class MergeController : public QObject
+// Mutations run on the background queue; refreshState stays synchronous
+// (four filesystem probes, microseconds).
+class MergeController : public AsyncController
 {
     Q_OBJECT
 

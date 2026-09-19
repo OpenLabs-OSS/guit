@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/AdvancedModels.h"
 #include "../git/DiffInfo.h"
 #include "../git/GitRepository.h"
@@ -12,7 +13,7 @@ namespace Guit
 
 // Coordinates the stash: saving, listing, inspecting, restoring, and
 // deleting stashed changes.
-class StashController : public QObject
+class StashController : public AsyncController
 {
     Q_OBJECT
 
@@ -38,7 +39,7 @@ signals:
     void headChanged();
 
 private:
-    void handleResult(const OperationResult &result);
+    void reloadAfter(const OperationResult &result);
 
     GitRepository *m_repository = nullptr;
     QList<StashInfo> m_entries;

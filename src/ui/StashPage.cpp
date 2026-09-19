@@ -18,7 +18,12 @@ StashPage::StashPage(StashController *controller, QWidget *parent)
     , m_infoLabel(new QLabel(this))
     , m_diff(new DiffViewer(this))
     , m_commandLabel(new QLabel(this))
+    , m_loadingBar(new QProgressBar(this))
 {
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
     m_infoLabel->setWordWrap(true);
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
@@ -64,10 +69,12 @@ StashPage::StashPage(StashController *controller, QWidget *parent)
     splitter->setSizes({300, 700});
 
     m_stashList->setAlternatingRowColors(true);
+    m_stashList->setUniformItemSizes(true);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
     layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_loadingBar);
     layout->addWidget(splitter);
 
     connect(m_controller, &StashController::stashChanged, this, &StashPage::onStashChanged);
@@ -81,6 +88,15 @@ StashPage::StashPage(StashController *controller, QWidget *parent)
     connect(clearButton, &QPushButton::clicked, this, &StashPage::onClear);
     connect(refreshButton, &QPushButton::clicked, this, &StashPage::refresh);
     connect(m_stashList, &QListWidget::itemSelectionChanged, this, &StashPage::onSelection);
+    connect(m_controller, &StashController::loadingChanged, this, &StashPage::setLoading);
+    m_actionButtons = {saveButton, applyButton, popButton, dropButton, clearButton, refreshButton};
+}
+
+void StashPage::setLoading(bool loading)
+{
+    m_loadingBar->setVisible(loading);
+    for (QPushButton *button : m_actionButtons)
+        button->setEnabled(!loading);
 }
 
 void StashPage::refresh()

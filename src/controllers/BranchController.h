@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/GitModels.h"
 #include "../git/GitRepository.h"
 
@@ -10,8 +11,10 @@ namespace Guit
 {
 
 // Coordinates the Branches page: listing, create/switch/rename/delete,
-// name validation, and pairwise comparison.
-class BranchController : public QObject
+// name validation, and pairwise comparison. Validation stays synchronous
+// (a single argument check, no repository scan); everything else runs
+// on the background queue.
+class BranchController : public AsyncController
 {
     Q_OBJECT
 
@@ -39,7 +42,7 @@ signals:
     void headChanged();
 
 private:
-    void handleResult(const OperationResult &result);
+    void reloadAfter(const OperationResult &result);
 
     GitRepository *m_repository = nullptr;
     QList<BranchInfo> m_branches;

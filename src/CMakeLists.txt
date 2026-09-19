@@ -33,6 +33,7 @@ add_library(guit_core STATIC
     app/ThemeManager.cpp
     controllers/RepositoryController.h
     controllers/RepositoryController.cpp
+    controllers/AsyncController.h
     controllers/ChangesController.h
     controllers/ChangesController.cpp
     controllers/HistoryController.h
@@ -104,7 +105,7 @@ add_library(guit_core STATIC
 )
 
 target_include_directories(guit_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(guit_core PUBLIC Qt6::Core Qt6::Widgets)
+target_link_libraries(guit_core PUBLIC Qt6::Core Qt6::Widgets Qt6::Concurrent)
 
 target_compile_options(guit_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra -Wpedantic>

@@ -33,7 +33,8 @@ struct GraphRow
 // can be drawn as a graph. The algorithm tracks one "active" lane per
 // open line of history: a commit takes over the lane waiting for it (or
 // opens a new one), then hands lanes to its parents. Merges fork/join
-// lanes; unusual topologies degrade to straight lines, never to crashes.
+// lanes; a parent outside the loaded window terminates its line at the
+// boundary instead of connecting into another row.
 class GraphLanes
 {
 public:

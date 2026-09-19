@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/GitModels.h"
 #include "../git/GraphLanes.h"
 #include "../git/GitRepository.h"
@@ -13,7 +14,15 @@ namespace Guit
 
 // Coordinates the History page: loading the commit list and resolving the
 // selected commit into full details (message, files, diff).
-class HistoryController : public QObject
+struct HistoryData
+{
+    QList<CommitInfo> commits;
+    QMap<QString, QStringList> refs;
+    QList<GraphRow> graph;
+    QString headHash;
+};
+
+class HistoryController : public AsyncController
 {
     Q_OBJECT
 

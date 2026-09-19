@@ -23,13 +23,19 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     , m_diff(new DiffViewer(this))
     , m_commandLabel(new QLabel(this))
     , m_filterBox(new QLineEdit(this))
+    , m_loadingBar(new QProgressBar(this))
 {
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
     Theme::applyMono(m_commandLabel);
     m_compareLabel->setWordWrap(true);
     Theme::applySecondary(m_compareLabel);
     m_branchList->setAlternatingRowColors(true);
+    m_branchList->setUniformItemSizes(true);
     m_filterBox->setPlaceholderText(tr("Filter branches…"));
     m_filterBox->setClearButtonEnabled(true);
 
@@ -92,6 +98,7 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
     layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_loadingBar);
     layout->addWidget(splitter);
 
     connect(m_controller, &BranchController::branchesChanged, this, &BranchesPage::onBranchesChanged);
@@ -109,6 +116,30 @@ BranchesPage::BranchesPage(BranchController *controller, MergeController *merge,
     connect(compareButton, &QPushButton::clicked, this, &BranchesPage::onCompare);
     connect(m_branchList, &QListWidget::itemDoubleClicked, this, &BranchesPage::onSwitch);
     connect(m_filterBox, &QLineEdit::textChanged, this, &BranchesPage::applyFilter);
+    connect(m_controller, &BranchController::loadingChanged, this, &BranchesPage::setLoading);
+    connect(m_merge, &MergeController::loadingChanged, this, &BranchesPage::setMergeLoading);
+    m_actionButtons = {newButton, switchButton, renameButton, deleteButton,
+                       mergeButton, rebaseButton, refreshButton, compareButton};
+}
+
+void BranchesPage::setLoading(bool loading)
+{
+    m_branchBusy = loading;
+    updateLoading();
+}
+
+void BranchesPage::setMergeLoading(bool loading)
+{
+    m_mergeBusy = loading;
+    updateLoading();
+}
+
+void BranchesPage::updateLoading()
+{
+    const bool busy = m_branchBusy || m_mergeBusy;
+    m_loadingBar->setVisible(busy);
+    for (QPushButton *button : m_actionButtons)
+        button->setEnabled(!busy);
 }
 
 void BranchesPage::applyFilter()

@@ -6,6 +6,7 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QLoggingCategory>
+#include <QMutexLocker>
 #include <QRegularExpression>
 #include <QStandardPaths>
 
@@ -45,20 +46,82 @@ GitRepository::GitRepository(QObject *parent)
     connect(m_network, &AsyncGitProcess::progress, this, &GitRepository::networkProgress);
     connect(m_network, &AsyncGitProcess::finished, this, [this](const GitProcessResult &result) {
         OperationResult operation;
-        operation.command = m_networkCommand;
-        if (result.isSuccess()) {
-            operation.ok = true;
-            operation.message = m_networkSuccessMessage;
-        } else if (result.error == GitError::Cancelled) {
-            operation.ok = false;
-            operation.message = tr("The operation was cancelled.");
-        } else {
-            operation.ok = false;
-            operation.message = !result.standardError.isEmpty() ? result.standardError : result.errorMessage;
+        {
+            QMutexLocker locker(&m_mutex);
+            operation.command = m_networkCommand;
+            if (result.isSuccess()) {
+                operation.ok = true;
+                operation.message = m_networkSuccessMessage;
+            } else if (result.error == GitError::Cancelled) {
+                operation.ok = false;
+                operation.message = tr("The operation was cancelled.");
+            } else {
+                operation.ok = false;
+                operation.message = !result.standardError.isEmpty() ? result.standardError : result.errorMessage;
+            }
         }
         refreshHead();
         emit networkFinished(operation);
     });
+}
+
+QThreadPool *GitRepository::backgroundPool()
+{
+    // One thread: Git operations serialize, so they never fight over the
+    // repository's index.lock, while the GUI thread never blocks.
+    static QThreadPool *pool = []() {
+        auto *created = new QThreadPool();
+        created->setMaxThreadCount(1);
+        return created;
+    }();
+    return pool;
+}
+
+RepoLocation GitRepository::snapshotLocation() const
+{
+    QMutexLocker locker(&m_mutex);
+    RepoLocation location;
+    location.valid = m_valid;
+    location.rootPath = m_rootPath;
+    location.gitDir = m_gitDir;
+    location.bare = m_bare;
+    return location;
+}
+
+void GitRepository::storeHead(const HeadInfo &head)
+{
+    QMutexLocker locker(&m_mutex);
+    m_head = head;
+}
+
+bool GitRepository::isValid() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_valid;
+}
+
+QString GitRepository::rootPath() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_rootPath;
+}
+
+QString GitRepository::gitDir() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_gitDir;
+}
+
+bool GitRepository::isBare() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_bare;
+}
+
+HeadInfo GitRepository::head() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_head;
 }
 
 bool GitRepository::open(const QString &path)
@@ -75,7 +138,13 @@ bool GitRepository::open(const QString &path)
         return false;
     }
 
-    const GitClient::RepositoryProbe probe = m_client->probeRepository(path);
+    // Opening a `.git` directory itself resolves to its worktree, so
+    // "open a folder containing .git" does what the user meant.
+    QString probePath = QDir::cleanPath(path);
+    if (QDir(probePath).dirName() == QStringLiteral(".git"))
+        probePath = QDir(probePath).filePath(QStringLiteral(".."));
+
+    const GitClient::RepositoryProbe probe = m_client->probeRepository(probePath);
     if (!probe.isRepository) {
         const QString reason = tr("The selected directory is not inside a Git repository.");
         qCInfo(guitRepoLog) << "Not a repository:" << path;
@@ -83,26 +152,33 @@ bool GitRepository::open(const QString &path)
         return false;
     }
 
-    m_rootPath = probe.rootPath;
-    m_gitDir = probe.gitDir;
-    m_bare = probe.isBare;
-    m_valid = true;
+    {
+        QMutexLocker locker(&m_mutex);
+        m_rootPath = probe.rootPath;
+        m_gitDir = probe.gitDir;
+        m_bare = probe.isBare;
+        m_valid = true;
+    }
     refreshHead();
-    qCInfo(guitRepoLog) << "Opened repository:" << m_rootPath;
+    qCInfo(guitRepoLog) << "Opened repository:" << probe.rootPath;
     emit repositoryChanged();
     return true;
 }
 
 void GitRepository::close()
 {
-    if (!m_valid)
-        return;
-    m_valid = false;
-    m_bare = false;
-    m_rootPath.clear();
-    m_gitDir.clear();
-    m_head = {};
-    emit repositoryClosed();
+    bool wasValid = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        wasValid = m_valid;
+        m_valid = false;
+        m_bare = false;
+        m_rootPath.clear();
+        m_gitDir.clear();
+        m_head = {};
+    }
+    if (wasValid)
+        emit repositoryClosed();
 }
 
 QList<FileStatusEntry> StatusSnapshot::staged() const
@@ -127,25 +203,26 @@ QList<FileStatusEntry> StatusSnapshot::unstaged() const
 
 bool GitRepository::refreshHead()
 {
-    m_head = {};
-    if (!m_valid)
-        return false;
+    const RepoLocation location = snapshotLocation();
+    HeadInfo head;
+    if (location.valid) {
+        // Current branch; empty output means detached HEAD or unborn branch.
+        const GitProcessResult branchResult = m_client->run(
+            {QStringLiteral("branch"), QStringLiteral("--show-current")}, location.rootPath);
+        const QString branch = branchResult.isSuccess() ? branchResult.standardOutput.trimmed() : QString();
 
-    // Current branch; empty output means detached HEAD or unborn branch.
-    const GitProcessResult branchResult = m_client->run(
-        {QStringLiteral("branch"), QStringLiteral("--show-current")}, m_rootPath);
-    const QString branch = branchResult.isSuccess() ? branchResult.standardOutput.trimmed() : QString();
+        const GitProcessResult headResult = m_client->run(
+            {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("HEAD")}, location.rootPath);
+        const bool hasHeadCommit = headResult.isSuccess();
 
-    const GitProcessResult headResult = m_client->run(
-        {QStringLiteral("rev-parse"), QStringLiteral("--verify"), QStringLiteral("HEAD")}, m_rootPath);
-    const bool hasHeadCommit = headResult.isSuccess();
-
-    m_head.known = true;
-    m_head.branch = branch;
-    m_head.unborn = !hasHeadCommit;
-    m_head.detached = hasHeadCommit && branch.isEmpty();
-    m_head.commitHash = hasHeadCommit ? headResult.standardOutput.trimmed() : QString();
-    return true;
+        head.known = true;
+        head.branch = branch;
+        head.unborn = !hasHeadCommit;
+        head.detached = hasHeadCommit && branch.isEmpty();
+        head.commitHash = hasHeadCommit ? headResult.standardOutput.trimmed() : QString();
+    }
+    storeHead(head);
+    return location.valid;
 }
 
 // --- Milestone 2: working tree --------------------------------------------
@@ -184,13 +261,14 @@ OperationResult runResult(const GitProcessResult &process,
 StatusSnapshot GitRepository::status() const
 {
     StatusSnapshot snapshot;
-    if (!m_valid) {
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid) {
         snapshot.errorMessage = tr("No repository is open.");
         return snapshot;
     }
     const GitProcessResult result = m_client->run(
         {QStringLiteral("status"), QStringLiteral("--porcelain=v1"), QStringLiteral("--untracked-files=normal")},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess()) {
         snapshot.errorMessage = !result.standardError.isEmpty() ? result.standardError : result.errorMessage;
         return snapshot;
@@ -202,45 +280,50 @@ StatusSnapshot GitRepository::status() const
 
 OperationResult GitRepository::stagePaths(const QStringList &paths)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (paths.isEmpty())
         return failureResult(tr("No files selected."));
     QStringList args{QStringLiteral("add"), QStringLiteral("--")};
     args.append(paths);
-    return runResult(m_client->run(args, m_rootPath), args, tr("Staged %n file(s).", nullptr, paths.size()), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Staged %n file(s).", nullptr, paths.size()), m_client);
 }
 
 OperationResult GitRepository::unstagePaths(const QStringList &paths)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (paths.isEmpty())
         return failureResult(tr("No files selected."));
     QStringList args{QStringLiteral("restore"), QStringLiteral("--staged"), QStringLiteral("--")};
     args.append(paths);
-    return runResult(m_client->run(args, m_rootPath), args, tr("Unstaged %n file(s).", nullptr, paths.size()), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Unstaged %n file(s).", nullptr, paths.size()), m_client);
 }
 
 OperationResult GitRepository::stageAll()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("add"), QStringLiteral("--all")};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Staged all changes."), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Staged all changes."), m_client);
 }
 
 OperationResult GitRepository::unstageAll()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("restore"), QStringLiteral("--staged"), QStringLiteral("--"), QStringLiteral(".")};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Unstaged all changes."), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Unstaged all changes."), m_client);
 }
 
 OperationResult GitRepository::discardEntries(const QList<FileStatusEntry> &entries)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (entries.isEmpty())
         return failureResult(tr("No files selected."));
@@ -264,14 +347,14 @@ OperationResult GitRepository::discardEntries(const QList<FileStatusEntry> &entr
         QStringList args{QStringLiteral("restore"), QStringLiteral("--source=HEAD"), QStringLiteral("--staged"),
                          QStringLiteral("--worktree"), QStringLiteral("--")};
         args.append(tracked);
-        OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Discarded changes."), m_client);
+        OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Discarded changes."), m_client);
         if (!result.ok)
             return result;
     }
     if (!untracked.isEmpty()) {
         QStringList args{QStringLiteral("clean"), QStringLiteral("--force"), QStringLiteral("--")};
         args.append(untracked);
-        OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Deleted untracked file(s)."), m_client);
+        OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Deleted untracked file(s)."), m_client);
         if (!result.ok)
             return result;
     }
@@ -286,7 +369,8 @@ OperationResult GitRepository::discardEntries(const QList<FileStatusEntry> &entr
 CommitResult GitRepository::commit(const QString &subject, const QString &body, bool amend)
 {
     CommitResult result;
-    if (!m_valid) {
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid) {
         result.message = tr("No repository is open.");
         return result;
     }
@@ -304,7 +388,7 @@ CommitResult GitRepository::commit(const QString &subject, const QString &body, 
         args.append(body.trimmed());
     }
     result.command = m_client->equivalentCommand(args);
-    const GitProcessResult process = m_client->run(args, m_rootPath);
+    const GitProcessResult process = m_client->run(args, location.rootPath);
     if (!process.isSuccess()) {
         result.ok = false;
         result.message = !process.standardError.isEmpty() ? process.standardError : process.errorMessage;
@@ -313,7 +397,7 @@ CommitResult GitRepository::commit(const QString &subject, const QString &body, 
     refreshHead();
     result.ok = true;
     const GitProcessResult hash = m_client->run(
-        {QStringLiteral("rev-parse"), QStringLiteral("HEAD")}, m_rootPath);
+        {QStringLiteral("rev-parse"), QStringLiteral("HEAD")}, location.rootPath);
     if (hash.isSuccess())
         result.commitHash = hash.standardOutput.trimmed();
     result.message = amend ? tr("Amended commit %1.").arg(result.commitHash.left(7))
@@ -323,7 +407,8 @@ CommitResult GitRepository::commit(const QString &subject, const QString &body, 
 
 QList<FileDiff> GitRepository::diffUnstaged(const QString &path) const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     QStringList args{QStringLiteral("diff"), QStringLiteral("--no-color"), QStringLiteral("--no-ext-diff"),
                      QStringLiteral("--src-prefix=a/"), QStringLiteral("--dst-prefix=b/"), QStringLiteral("--")};
@@ -331,7 +416,7 @@ QList<FileDiff> GitRepository::diffUnstaged(const QString &path) const
         args.append(path);
     else
         args.append(QStringLiteral("."));
-    const GitProcessResult result = m_client->run(args, m_rootPath);
+    const GitProcessResult result = m_client->run(args, location.rootPath);
     if (!result.isSuccess())
         return {};
     return parseUnifiedDiff(result.standardOutput);
@@ -339,7 +424,8 @@ QList<FileDiff> GitRepository::diffUnstaged(const QString &path) const
 
 QList<FileDiff> GitRepository::diffStaged(const QString &path) const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     QStringList args{QStringLiteral("diff"), QStringLiteral("--cached"), QStringLiteral("--no-color"),
                      QStringLiteral("--no-ext-diff"), QStringLiteral("--")};
@@ -347,7 +433,7 @@ QList<FileDiff> GitRepository::diffStaged(const QString &path) const
         args.append(path);
     else
         args.append(QStringLiteral("."));
-    const GitProcessResult result = m_client->run(args, m_rootPath);
+    const GitProcessResult result = m_client->run(args, location.rootPath);
     if (!result.isSuccess())
         return {};
     return parseUnifiedDiff(result.standardOutput);
@@ -357,12 +443,15 @@ QList<FileDiff> GitRepository::diffStaged(const QString &path) const
 
 QList<CommitInfo> GitRepository::log(int maxCount) const
 {
-    if (!m_valid || maxCount <= 0)
+    if (maxCount <= 0)
+        return {};
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result = m_client->run(
         {QStringLiteral("log"), QStringLiteral("--format=") + CommitInfo::logFormat(),
          QStringLiteral("--max-count=") + QString::number(maxCount)},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return CommitInfo::parseLog(result.standardOutput);
@@ -371,7 +460,8 @@ QList<CommitInfo> GitRepository::log(int maxCount) const
 CommitDetails GitRepository::showCommit(const QString &hash) const
 {
     CommitDetails details;
-    if (!m_valid) {
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid) {
         details.errorMessage = tr("No repository is open.");
         return details;
     }
@@ -381,7 +471,7 @@ CommitDetails GitRepository::showCommit(const QString &hash) const
     }
     const GitProcessResult info = m_client->run(
         {QStringLiteral("log"), QStringLiteral("-1"), QStringLiteral("--format=") + CommitInfo::logFormat(), hash},
-        m_rootPath);
+        location.rootPath);
     if (!info.isSuccess()) {
         details.errorMessage = !info.standardError.isEmpty() ? info.standardError : info.errorMessage;
         return details;
@@ -397,14 +487,14 @@ CommitDetails GitRepository::showCommit(const QString &hash) const
     const GitProcessResult files = m_client->run(
         {QStringLiteral("diff-tree"), QStringLiteral("--no-commit-id"), QStringLiteral("--name-status"),
          QStringLiteral("-r"), QStringLiteral("--root"), QStringLiteral("--find-renames"), hash},
-        m_rootPath);
+        location.rootPath);
     if (files.isSuccess())
         details.files = CommitDetails::parseNameStatus(files.standardOutput);
 
     const GitProcessResult patch = m_client->run(
         {QStringLiteral("show"), QStringLiteral("--format="), QStringLiteral("--no-color"),
          QStringLiteral("--no-ext-diff"), QStringLiteral("--unified=3"), hash},
-        m_rootPath);
+        location.rootPath);
     if (patch.isSuccess())
         details.diffs = parseUnifiedDiff(patch.standardOutput);
 
@@ -416,12 +506,13 @@ CommitDetails GitRepository::showCommit(const QString &hash) const
 
 QList<BranchInfo> GitRepository::branches() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result = m_client->run(
         {QStringLiteral("for-each-ref"), QStringLiteral("--format=") + BranchInfo::forEachRefFormat(),
          QStringLiteral("refs/heads"), QStringLiteral("refs/remotes")},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return BranchInfo::parseForEachRef(result.standardOutput);
@@ -429,17 +520,21 @@ QList<BranchInfo> GitRepository::branches() const
 
 bool GitRepository::validateBranchName(const QString &name) const
 {
-    if (!m_valid || name.trimmed().isEmpty())
+    if (name.trimmed().isEmpty())
+        return false;
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return false;
     const GitProcessResult result = m_client->run(
-        {QStringLiteral("check-ref-format"), QStringLiteral("--branch"), name.trimmed()}, m_rootPath);
+        {QStringLiteral("check-ref-format"), QStringLiteral("--branch"), name.trimmed()}, location.rootPath);
     return result.isSuccess();
 }
 
 OperationResult GitRepository::createBranch(const QString &name, const QString &startPoint, bool checkout)
 {
     const QString trimmed = name.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (!validateBranchName(trimmed))
         return failureResult(tr("“%1” is not a valid branch name.").arg(name));
@@ -450,7 +545,7 @@ OperationResult GitRepository::createBranch(const QString &name, const QString &
         args = {QStringLiteral("branch"), trimmed};
     if (!startPoint.trimmed().isEmpty())
         args.append(startPoint.trimmed());
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        checkout ? tr("Created and switched to branch “%1”.").arg(trimmed)
                                                 : tr("Created branch “%1”.").arg(trimmed),
                                        m_client);
@@ -461,7 +556,8 @@ OperationResult GitRepository::createBranch(const QString &name, const QString &
 
 OperationResult GitRepository::switchBranch(const QString &name)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (name.trimmed().isEmpty())
         return failureResult(tr("No branch selected."));
@@ -469,7 +565,7 @@ OperationResult GitRepository::switchBranch(const QString &name)
     // branches (creates a local tracking branch) alike. Uncommitted changes
     // that would be overwritten abort with a clear Git message we surface.
     const QStringList args{QStringLiteral("switch"), name.trimmed()};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        tr("Switched to “%1”.").arg(name.trimmed()), m_client);
     if (result.ok)
         refreshHead();
@@ -479,12 +575,13 @@ OperationResult GitRepository::switchBranch(const QString &name)
 OperationResult GitRepository::renameBranch(const QString &oldName, const QString &newName)
 {
     const QString trimmed = newName.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (!validateBranchName(trimmed))
         return failureResult(tr("“%1” is not a valid branch name.").arg(newName));
     const QStringList args{QStringLiteral("branch"), QStringLiteral("--move"), oldName, trimmed};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        tr("Renamed branch to “%1”.").arg(trimmed), m_client);
     if (result.ok)
         refreshHead();
@@ -493,12 +590,13 @@ OperationResult GitRepository::renameBranch(const QString &oldName, const QStrin
 
 OperationResult GitRepository::deleteBranch(const QString &name, bool force)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (head().branch == name)
         return failureResult(tr("Cannot delete “%1” while it is checked out. Switch to another branch first.").arg(name));
     const QStringList args{QStringLiteral("branch"), force ? QStringLiteral("-D") : QStringLiteral("-d"), name};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        force ? tr("Force-deleted branch “%1”.").arg(name)
                                              : tr("Deleted branch “%1”.").arg(name),
                                        m_client);
@@ -508,12 +606,15 @@ OperationResult GitRepository::deleteBranch(const QString &name, bool force)
 AheadBehind GitRepository::aheadBehind(const QString &from, const QString &to) const
 {
     AheadBehind result;
-    if (!m_valid || from.isEmpty() || to.isEmpty())
+    if (from.isEmpty() || to.isEmpty())
+        return result;
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return result;
     const GitProcessResult process = m_client->run(
         {QStringLiteral("rev-list"), QStringLiteral("--left-right"), QStringLiteral("--count"),
          from + QStringLiteral("...") + to},
-        m_rootPath);
+        location.rootPath);
     if (!process.isSuccess())
         return result;
     const QStringList parts = process.standardOutput.trimmed().split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
@@ -527,12 +628,15 @@ AheadBehind GitRepository::aheadBehind(const QString &from, const QString &to) c
 
 QList<FileDiff> GitRepository::compareDiff(const QString &from, const QString &to) const
 {
-    if (!m_valid || from.isEmpty() || to.isEmpty())
+    if (from.isEmpty() || to.isEmpty())
+        return {};
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result = m_client->run(
         {QStringLiteral("diff"), QStringLiteral("--no-color"), QStringLiteral("--no-ext-diff"),
          from + QStringLiteral("...") + to},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return parseUnifiedDiff(result.standardOutput);
@@ -561,9 +665,10 @@ OperationResult GitRepository::initRepository(const QString &path, const QString
 
 QList<RemoteInfo> GitRepository::remotes() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
-    const GitProcessResult result = m_client->run({QStringLiteral("remote"), QStringLiteral("-v")}, m_rootPath);
+    const GitProcessResult result = m_client->run({QStringLiteral("remote"), QStringLiteral("-v")}, location.rootPath);
     if (!result.isSuccess())
         return {};
     return RemoteInfo::parseVerboseList(result.standardOutput);
@@ -573,55 +678,62 @@ OperationResult GitRepository::addRemote(const QString &name, const QString &url
 {
     const QString trimmedName = name.trimmed();
     const QString trimmedUrl = url.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (trimmedName.isEmpty() || trimmedUrl.isEmpty())
         return failureResult(tr("Remote name and URL are required."));
     const QStringList args{QStringLiteral("remote"), QStringLiteral("add"), trimmedName, trimmedUrl};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Added remote “%1”.").arg(trimmedName), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Added remote “%1”.").arg(trimmedName), m_client);
 }
 
 OperationResult GitRepository::removeRemote(const QString &name)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("remote"), QStringLiteral("remove"), name};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Removed remote “%1”.").arg(name), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Removed remote “%1”.").arg(name), m_client);
 }
 
 OperationResult GitRepository::renameRemote(const QString &oldName, const QString &newName)
 {
     const QString trimmed = newName.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (trimmed.isEmpty())
         return failureResult(tr("Enter a new remote name."));
     const QStringList args{QStringLiteral("remote"), QStringLiteral("rename"), oldName, trimmed};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Renamed remote to “%1”.").arg(trimmed), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Renamed remote to “%1”.").arg(trimmed), m_client);
 }
 
 OperationResult GitRepository::setRemoteUrl(const QString &name, const QString &url)
 {
     const QString trimmedUrl = url.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (trimmedUrl.isEmpty())
         return failureResult(tr("Enter a URL."));
     const QStringList args{QStringLiteral("remote"), QStringLiteral("set-url"), name, trimmedUrl};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Updated the URL of remote “%1”.").arg(name), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Updated the URL of remote “%1”.").arg(name), m_client);
 }
 
 // --- Milestone 3: network operations (asynchronous) --------------------------
 
 void GitRepository::startNetwork(const QStringList &args, const QString &successMessage)
 {
-    if (!m_valid || !m_client->hasGit() || m_network->isRunning())
+    // Network operations stay on the GUI thread (AsyncGitProcess needs its
+    // event loop); only quick member reads happen here.
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid || !m_client->hasGit() || m_network->isRunning())
         return;
     m_networkCommand = m_client->equivalentCommand(args);
     m_networkSuccessMessage = successMessage;
     // Git handles authentication itself via credential helpers; Guit never
     // sees passwords or tokens. Progress goes to stderr (--progress).
-    m_network->start(m_client->gitExecutable(), args, m_rootPath, 30 * 60 * 1000);
+    m_network->start(m_client->gitExecutable(), args, location.rootPath, 30 * 60 * 1000);
     emit networkStarted(m_networkCommand);
 }
 
@@ -684,12 +796,13 @@ bool GitRepository::isNetworkRunning() const
 
 QList<TagInfo> GitRepository::tags() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result = m_client->run(
         {QStringLiteral("for-each-ref"), QStringLiteral("--format=") + TagInfo::forEachRefFormat(),
          QStringLiteral("--sort=-creatordate"), QStringLiteral("refs/tags")},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return TagInfo::parseForEachRef(result.standardOutput);
@@ -698,7 +811,8 @@ QList<TagInfo> GitRepository::tags() const
 OperationResult GitRepository::createTag(const QString &name, const QString &message, const QString &target)
 {
     const QString trimmed = name.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (trimmed.isEmpty())
         return failureResult(tr("Enter a tag name."));
@@ -713,27 +827,29 @@ OperationResult GitRepository::createTag(const QString &name, const QString &mes
     }
     if (!target.trimmed().isEmpty())
         args.append(target.trimmed());
-    return runResult(m_client->run(args, m_rootPath), args, tr("Created tag “%1”.").arg(trimmed), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Created tag “%1”.").arg(trimmed), m_client);
 }
 
 OperationResult GitRepository::deleteTag(const QString &name)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("tag"), QStringLiteral("--delete"), name};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Deleted tag “%1”.").arg(name), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Deleted tag “%1”.").arg(name), m_client);
 }
 
 CommitDetails GitRepository::showTag(const QString &name) const
 {
     CommitDetails details;
-    if (!m_valid) {
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid) {
         details.errorMessage = tr("No repository is open.");
         return details;
     }
     // Peel the tag to its commit (annotated tags point at a tag object).
     const GitProcessResult peeled = m_client->run(
-        {QStringLiteral("rev-parse"), name + QStringLiteral("^{commit}")}, m_rootPath);
+        {QStringLiteral("rev-parse"), name + QStringLiteral("^{commit}")}, location.rootPath);
     if (!peeled.isSuccess()) {
         details.errorMessage = tr("Tag “%1” was not found.").arg(name);
         return details;
@@ -745,9 +861,10 @@ CommitDetails GitRepository::showTag(const QString &name) const
 
 QList<StashInfo> GitRepository::stashList() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
-    const GitProcessResult result = m_client->run({QStringLiteral("stash"), QStringLiteral("list")}, m_rootPath);
+    const GitProcessResult result = m_client->run({QStringLiteral("stash"), QStringLiteral("list")}, location.rootPath);
     if (!result.isSuccess())
         return {};
     return StashInfo::parseList(result.standardOutput);
@@ -755,7 +872,8 @@ QList<StashInfo> GitRepository::stashList() const
 
 OperationResult GitRepository::stashPush(const QString &message, bool includeUntracked)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     // A stash shelves uncommitted changes so you can switch context and
     // restore them later with apply/pop.
@@ -766,15 +884,16 @@ OperationResult GitRepository::stashPush(const QString &message, bool includeUnt
         args.append(QStringLiteral("--message"));
         args.append(message.trimmed());
     }
-    return runResult(m_client->run(args, m_rootPath), args, tr("Stashed the working-tree changes."), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Stashed the working-tree changes."), m_client);
 }
 
 OperationResult GitRepository::stashApply(const QString &stashRef)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("stash"), QStringLiteral("apply"), stashRef};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        tr("Applied %1 (kept in the stash).").arg(stashRef), m_client);
     if (result.ok)
         refreshHead();
@@ -783,10 +902,11 @@ OperationResult GitRepository::stashApply(const QString &stashRef)
 
 OperationResult GitRepository::stashPop(const QString &stashRef)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("stash"), QStringLiteral("pop"), stashRef};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        tr("Restored %1 and removed it from the stash.").arg(stashRef), m_client);
     if (result.ok)
         refreshHead();
@@ -795,28 +915,33 @@ OperationResult GitRepository::stashPop(const QString &stashRef)
 
 OperationResult GitRepository::stashDrop(const QString &stashRef)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("stash"), QStringLiteral("drop"), stashRef};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Dropped %1.").arg(stashRef), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Dropped %1.").arg(stashRef), m_client);
 }
 
 OperationResult GitRepository::stashClear()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("stash"), QStringLiteral("clear")};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Cleared all stashes."), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Cleared all stashes."), m_client);
 }
 
 QList<FileDiff> GitRepository::stashShow(const QString &stashRef) const
 {
-    if (!m_valid || stashRef.isEmpty())
+    if (stashRef.isEmpty())
+        return {};
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result = m_client->run(
         {QStringLiteral("stash"), QStringLiteral("show"), QStringLiteral("--no-color"),
          QStringLiteral("--no-ext-diff"), QStringLiteral("-p"), stashRef},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return parseUnifiedDiff(result.standardOutput);
@@ -826,7 +951,8 @@ QList<FileDiff> GitRepository::stashShow(const QString &stashRef) const
 
 OperationResult GitRepository::mergeBranch(const QString &name, bool noFastForward)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (name.trimmed().isEmpty())
         return failureResult(tr("No branch selected."));
@@ -836,7 +962,7 @@ OperationResult GitRepository::mergeBranch(const QString &name, bool noFastForwa
     if (noFastForward)
         args.append(QStringLiteral("--no-ff"));
     args.append(name.trimmed());
-    const GitProcessResult process = m_client->run(args, m_rootPath);
+    const GitProcessResult process = m_client->run(args, location.rootPath);
     OperationResult result;
     result.command = m_client->equivalentCommand(args);
     refreshHead();
@@ -860,10 +986,11 @@ OperationResult GitRepository::mergeBranch(const QString &name, bool noFastForwa
 
 OperationResult GitRepository::mergeAbort()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("merge"), QStringLiteral("--abort")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Aborted the merge."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Aborted the merge."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -871,14 +998,15 @@ OperationResult GitRepository::mergeAbort()
 
 OperationResult GitRepository::mergeContinue()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("-c"), QStringLiteral("core.editor=true"), QStringLiteral("merge"),
                            QStringLiteral("--continue")};
     // --continue reuses the in-progress message (MERGE_MSG). Pinning the
     // editor to `true` guarantees no interactive editor can ever hang the
     // UI or the tests when Git decides a message needs a look.
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Completed the merge."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Completed the merge."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -888,7 +1016,8 @@ OperationResult GitRepository::mergeContinue()
 
 OperationResult GitRepository::rebaseOnto(const QString &branch)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (branch.trimmed().isEmpty())
         return failureResult(tr("No branch selected."));
@@ -896,7 +1025,7 @@ OperationResult GitRepository::rebaseOnto(const QString &branch)
     // merge it rewrites history, so it needs the explicit explanation and
     // confirmation the UI provides.
     const QStringList args{QStringLiteral("rebase"), branch.trimmed()};
-    const GitProcessResult process = m_client->run(args, m_rootPath);
+    const GitProcessResult process = m_client->run(args, location.rootPath);
     OperationResult result;
     result.command = m_client->equivalentCommand(args);
     refreshHead();
@@ -918,11 +1047,12 @@ OperationResult GitRepository::rebaseOnto(const QString &branch)
 
 OperationResult GitRepository::rebaseContinue()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("-c"), QStringLiteral("core.editor=true"), QStringLiteral("rebase"),
                            QStringLiteral("--continue")};
-    const GitProcessResult process = m_client->run(args, m_rootPath);
+    const GitProcessResult process = m_client->run(args, location.rootPath);
     OperationResult result;
     result.command = m_client->equivalentCommand(args);
     refreshHead();
@@ -944,10 +1074,11 @@ OperationResult GitRepository::rebaseContinue()
 
 OperationResult GitRepository::rebaseSkip()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("rebase"), QStringLiteral("--skip")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Skipped the current commit."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Skipped the current commit."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -955,10 +1086,11 @@ OperationResult GitRepository::rebaseSkip()
 
 OperationResult GitRepository::rebaseAbort()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("rebase"), QStringLiteral("--abort")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Aborted the rebase."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Aborted the rebase."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -968,7 +1100,8 @@ OperationResult GitRepository::rebaseAbort()
 
 OperationResult GitRepository::resetTo(const QString &target, ResetMode mode)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (target.trimmed().isEmpty())
         return failureResult(tr("No target selected."));
@@ -976,7 +1109,7 @@ OperationResult GitRepository::resetTo(const QString &target, ResetMode mode)
         : (mode == ResetMode::Hard)                 ? QStringLiteral("--hard")
                                                     : QStringLiteral("--mixed");
     const QStringList args{QStringLiteral("reset"), flag, target.trimmed()};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        tr("Reset to %1 (%2).").arg(target.trimmed(), resetModeLabel(mode)), m_client);
     if (result.ok)
         refreshHead();
@@ -985,14 +1118,15 @@ OperationResult GitRepository::resetTo(const QString &target, ResetMode mode)
 
 OperationResult GitRepository::revertCommit(const QString &hash)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (hash.trimmed().isEmpty())
         return failureResult(tr("No commit selected."));
     // A revert records a NEW commit that undoes the selected one; history
     // is never rewritten.
     const QStringList args{QStringLiteral("revert"), QStringLiteral("--no-edit"), hash.trimmed()};
-    const GitProcessResult process = m_client->run(args, m_rootPath);
+    const GitProcessResult process = m_client->run(args, location.rootPath);
     OperationResult result;
     result.command = m_client->equivalentCommand(args);
     refreshHead();
@@ -1014,11 +1148,12 @@ OperationResult GitRepository::revertCommit(const QString &hash)
 
 OperationResult GitRepository::revertContinue()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("-c"), QStringLiteral("core.editor=true"), QStringLiteral("revert"),
                            QStringLiteral("--continue")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Completed the revert."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Completed the revert."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -1026,10 +1161,11 @@ OperationResult GitRepository::revertContinue()
 
 OperationResult GitRepository::revertAbort()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("revert"), QStringLiteral("--abort")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Aborted the revert."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Aborted the revert."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -1037,12 +1173,13 @@ OperationResult GitRepository::revertAbort()
 
 OperationResult GitRepository::cherryPick(const QString &hash)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (hash.trimmed().isEmpty())
         return failureResult(tr("No commit selected."));
     const QStringList args{QStringLiteral("cherry-pick"), hash.trimmed()};
-    const GitProcessResult process = m_client->run(args, m_rootPath);
+    const GitProcessResult process = m_client->run(args, location.rootPath);
     OperationResult result;
     result.command = m_client->equivalentCommand(args);
     refreshHead();
@@ -1064,11 +1201,12 @@ OperationResult GitRepository::cherryPick(const QString &hash)
 
 OperationResult GitRepository::cherryPickContinue()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("-c"), QStringLiteral("core.editor=true"), QStringLiteral("cherry-pick"),
                            QStringLiteral("--continue")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Completed the cherry-pick."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Completed the cherry-pick."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -1076,10 +1214,11 @@ OperationResult GitRepository::cherryPickContinue()
 
 OperationResult GitRepository::cherryPickAbort()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("cherry-pick"), QStringLiteral("--abort")};
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args, tr("Aborted the cherry-pick."), m_client);
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args, tr("Aborted the cherry-pick."), m_client);
     if (result.ok)
         refreshHead();
     return result;
@@ -1090,9 +1229,10 @@ OperationResult GitRepository::cherryPickAbort()
 OperationState GitRepository::operationState() const
 {
     OperationState state;
-    if (!m_valid || m_gitDir.isEmpty())
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid || location.gitDir.isEmpty())
         return state;
-    const QString gitDir = m_gitDir;
+    const QString gitDir = location.gitDir;
     state.merging = QFile::exists(QDir(gitDir).filePath(QStringLiteral("MERGE_HEAD")));
     state.rebasing = QDir(QDir(gitDir).filePath(QStringLiteral("rebase-merge"))).exists()
         || QDir(QDir(gitDir).filePath(QStringLiteral("rebase-apply"))).exists();
@@ -1113,18 +1253,19 @@ OperationState GitRepository::operationState() const
 
 OperationResult GitRepository::resolveWithOurs(const QString &path)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (path.isEmpty())
         return failureResult(tr("No file selected."));
     // --ours/--theirs write the chosen side to the index and the file.
     // Staging explicitly afterwards guarantees the conflict markers clear.
     const QStringList takeArgs{QStringLiteral("checkout"), QStringLiteral("--ours"), QStringLiteral("--"), path};
-    OperationResult result = runResult(m_client->run(takeArgs, m_rootPath), takeArgs, {}, m_client);
+    OperationResult result = runResult(m_client->run(takeArgs, location.rootPath), takeArgs, {}, m_client);
     if (!result.ok)
         return result;
     const QStringList addArgs{QStringLiteral("add"), QStringLiteral("--"), path};
-    result = runResult(m_client->run(addArgs, m_rootPath), addArgs,
+    result = runResult(m_client->run(addArgs, location.rootPath), addArgs,
                        tr("Resolved “%1” with your changes.").arg(path), m_client);
     // Show the resolution command, not the bookkeeping `git add`.
     result.command = m_client->equivalentCommand(takeArgs);
@@ -1133,16 +1274,17 @@ OperationResult GitRepository::resolveWithOurs(const QString &path)
 
 OperationResult GitRepository::resolveWithTheirs(const QString &path)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (path.isEmpty())
         return failureResult(tr("No file selected."));
     const QStringList takeArgs{QStringLiteral("checkout"), QStringLiteral("--theirs"), QStringLiteral("--"), path};
-    OperationResult result = runResult(m_client->run(takeArgs, m_rootPath), takeArgs, {}, m_client);
+    OperationResult result = runResult(m_client->run(takeArgs, location.rootPath), takeArgs, {}, m_client);
     if (!result.ok)
         return result;
     const QStringList addArgs{QStringLiteral("add"), QStringLiteral("--"), path};
-    result = runResult(m_client->run(addArgs, m_rootPath), addArgs,
+    result = runResult(m_client->run(addArgs, location.rootPath), addArgs,
                        tr("Resolved “%1” with their changes.").arg(path), m_client);
     // Show the resolution command, not the bookkeeping `git add`.
     result.command = m_client->equivalentCommand(takeArgs);
@@ -1153,13 +1295,20 @@ OperationResult GitRepository::resolveWithTheirs(const QString &path)
 
 QList<CommitInfo> GitRepository::logAll(int maxCount) const
 {
-    if (!m_valid || maxCount <= 0)
+    if (maxCount <= 0)
         return {};
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
+        return {};
+    // Explicit ref classes instead of --all: `git log --all` also walks
+    // refs/stash, leaking stash commits into normal History. Branches,
+    // remotes, and tags are exactly what the graph view wants; the
+    // dedicated Stashes page reads the stash separately.
     const GitProcessResult result = m_client->run(
-        {QStringLiteral("log"), QStringLiteral("--all"), QStringLiteral("--topo-order"),
-         QStringLiteral("--format=") + CommitInfo::logFormat(),
+        {QStringLiteral("log"), QStringLiteral("--branches"), QStringLiteral("--remotes"), QStringLiteral("--tags"),
+         QStringLiteral("--topo-order"), QStringLiteral("--format=") + CommitInfo::logFormat(),
          QStringLiteral("--max-count=") + QString::number(maxCount)},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return CommitInfo::parseLog(result.standardOutput);
@@ -1168,13 +1317,14 @@ QList<CommitInfo> GitRepository::logAll(int maxCount) const
 QMap<QString, QStringList> GitRepository::refsByHash() const
 {
     QMap<QString, QStringList> refs;
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return refs;
     // Peeled object first so annotated tags map to their commit.
     const GitProcessResult result = m_client->run(
         {QStringLiteral("for-each-ref"), QStringLiteral("--format=%(*objectname)%1f%(objectname)%1f%(refname:short)"),
          QStringLiteral("refs/heads"), QStringLiteral("refs/remotes"), QStringLiteral("refs/tags")},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return refs;
     const QStringList lines = result.standardOutput.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
@@ -1193,7 +1343,10 @@ QMap<QString, QStringList> GitRepository::refsByHash() const
 QList<CommitInfo> GitRepository::searchCommits(const QString &query, int maxCount) const
 {
     const QString needle = query.trimmed();
-    if (!m_valid || needle.isEmpty())
+    if (needle.isEmpty())
+        return {};
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     QList<CommitInfo> matches;
     for (const CommitInfo &commit : logAll(maxCount)) {
@@ -1210,12 +1363,15 @@ QList<CommitInfo> GitRepository::searchCommits(const QString &query, int maxCoun
 
 QList<ReflogEntry> GitRepository::reflog(int maxCount) const
 {
-    if (!m_valid || maxCount <= 0)
+    if (maxCount <= 0)
+        return {};
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result = m_client->run(
         {QStringLiteral("reflog"), QStringLiteral("--format=") + ReflogEntry::logFormat(),
          QStringLiteral("-n"), QString::number(maxCount)},
-        m_rootPath);
+        location.rootPath);
     if (!result.isSuccess())
         return {};
     return ReflogEntry::parse(result.standardOutput);
@@ -1241,16 +1397,17 @@ LfsInfo GitRepository::lfsInfo() const
     info.available = version.isSuccess();
     if (info.available)
         info.version = version.standardOutput.trimmed().split(QLatin1Char('\n')).constFirst().trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return info;
     // The repo routes files through LFS when .gitattributes says so.
-    QFile attributes(QDir(m_rootPath).filePath(QStringLiteral(".gitattributes")));
+    QFile attributes(QDir(location.rootPath).filePath(QStringLiteral(".gitattributes")));
     if (attributes.open(QIODevice::ReadOnly | QIODevice::Text)) {
         const QString content = QString::fromUtf8(attributes.readAll());
         info.enabledInRepo = content.contains(QStringLiteral("filter=lfs"));
     }
     if (info.enabledInRepo) {
-        const GitProcessResult files = GitProcess::run(lfs, {QStringLiteral("ls-files")}, m_rootPath, 30000);
+        const GitProcessResult files = GitProcess::run(lfs, {QStringLiteral("ls-files")}, location.rootPath, 30000);
         if (files.isSuccess())
             info.trackedFiles = files.standardOutput.split(QLatin1Char('\n'), Qt::SkipEmptyParts).size();
     }
@@ -1260,7 +1417,8 @@ LfsInfo GitRepository::lfsInfo() const
 OperationResult GitRepository::lfsTrack(const QString &pattern)
 {
     const QString trimmed = pattern.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (trimmed.isEmpty())
         return failureResult(tr("Enter a file pattern, e.g. *.psd."));
@@ -1268,7 +1426,7 @@ OperationResult GitRepository::lfsTrack(const QString &pattern)
     if (lfs.isEmpty())
         return failureResult(tr("Git LFS is not installed."));
     const QStringList args{QStringLiteral("track"), trimmed};
-    const GitProcessResult process = GitProcess::run(lfs, args, m_rootPath);
+    const GitProcessResult process = GitProcess::run(lfs, args, location.rootPath);
     OperationResult result;
     result.command = QStringLiteral("git lfs track %1").arg(trimmed);
     if (!process.isSuccess()) {
@@ -1283,10 +1441,11 @@ OperationResult GitRepository::lfsTrack(const QString &pattern)
 
 QList<SubmoduleInfo> GitRepository::submodules() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result =
-        m_client->run({QStringLiteral("submodule"), QStringLiteral("status")}, m_rootPath);
+        m_client->run({QStringLiteral("submodule"), QStringLiteral("status")}, location.rootPath);
     if (!result.isSuccess())
         return {};
     return SubmoduleInfo::parseStatus(result.standardOutput);
@@ -1294,29 +1453,32 @@ QList<SubmoduleInfo> GitRepository::submodules() const
 
 OperationResult GitRepository::submoduleUpdate(bool initialize)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     QStringList args{QStringLiteral("submodule"), QStringLiteral("update")};
     if (initialize)
         args.append(QStringLiteral("--init"));
-    return runResult(m_client->run(args, m_rootPath, 10 * 60 * 1000), args,
+    return runResult(m_client->run(args, location.rootPath, 10 * 60 * 1000), args,
                      tr("Updated submodules."), m_client);
 }
 
 OperationResult GitRepository::submoduleSync()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("submodule"), QStringLiteral("sync")};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Synchronized submodule URLs."), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Synchronized submodule URLs."), m_client);
 }
 
 QList<WorktreeInfo> GitRepository::worktrees() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
     const GitProcessResult result =
-        m_client->run({QStringLiteral("worktree"), QStringLiteral("list"), QStringLiteral("--porcelain")}, m_rootPath);
+        m_client->run({QStringLiteral("worktree"), QStringLiteral("list"), QStringLiteral("--porcelain")}, location.rootPath);
     if (!result.isSuccess())
         return {};
     return WorktreeInfo::parsePorcelain(result.standardOutput);
@@ -1325,7 +1487,8 @@ QList<WorktreeInfo> GitRepository::worktrees() const
 OperationResult GitRepository::worktreeAdd(const QString &path, const QString &source, bool newBranch)
 {
     const QString trimmedPath = path.trimmed();
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (trimmedPath.isEmpty())
         return failureResult(tr("Enter a directory for the new worktree."));
@@ -1339,14 +1502,15 @@ OperationResult GitRepository::worktreeAdd(const QString &path, const QString &s
     args.append(trimmedPath);
     if (!newBranch && !source.trimmed().isEmpty())
         args.append(source.trimmed());
-    OperationResult result = runResult(m_client->run(args, m_rootPath), args,
+    OperationResult result = runResult(m_client->run(args, location.rootPath), args,
                                        tr("Added worktree at %1.").arg(trimmedPath), m_client);
     return result;
 }
 
 OperationResult GitRepository::worktreeRemove(const QString &path, bool force)
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     if (path.isEmpty())
         return failureResult(tr("No worktree selected."));
@@ -1354,15 +1518,16 @@ OperationResult GitRepository::worktreeRemove(const QString &path, bool force)
     if (force)
         args.append(QStringLiteral("--force"));
     args.append(path);
-    return runResult(m_client->run(args, m_rootPath), args, tr("Removed worktree %1.").arg(path), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Removed worktree %1.").arg(path), m_client);
 }
 
 OperationResult GitRepository::worktreePrune()
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return failureResult(tr("No repository is open."));
     const QStringList args{QStringLiteral("worktree"), QStringLiteral("prune")};
-    return runResult(m_client->run(args, m_rootPath), args, tr("Pruned worktree metadata."), m_client);
+    return runResult(m_client->run(args, location.rootPath), args, tr("Pruned worktree metadata."), m_client);
 }
 
 // --- Milestone 4: repository facts + .gitignore ---------------------------------------
@@ -1393,20 +1558,21 @@ qlonglong directorySize(const QString &path, int depth = 0)
 RepoInfo GitRepository::repositoryInfo() const
 {
     RepoInfo info;
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return info;
     info.valid = true;
-    info.rootPath = m_rootPath;
-    info.gitDir = m_gitDir;
-    info.isBare = m_bare;
-    const HeadInfo head = m_head;
+    info.rootPath = location.rootPath;
+    info.gitDir = location.gitDir;
+    info.isBare = location.bare;
+    const HeadInfo head = this->head();
     info.branch = head.branch;
     info.detached = head.detached;
     info.unborn = head.unborn;
     info.headHash = head.commitHash;
     if (!head.unborn) {
         const GitProcessResult count =
-            m_client->run({QStringLiteral("rev-list"), QStringLiteral("--count"), QStringLiteral("HEAD")}, m_rootPath);
+            m_client->run({QStringLiteral("rev-list"), QStringLiteral("--count"), QStringLiteral("HEAD")}, location.rootPath);
         if (count.isSuccess())
             info.commitCount = count.standardOutput.trimmed().toInt();
     } else {
@@ -1416,16 +1582,17 @@ RepoInfo GitRepository::repositoryInfo() const
     info.branchCount = branches().size();
     info.tagCount = tags().size();
     info.stashCount = stashList().size();
-    if (!m_gitDir.isEmpty())
-        info.gitDirSizeBytes = directorySize(m_gitDir);
+    if (!location.gitDir.isEmpty())
+        info.gitDirSizeBytes = directorySize(location.gitDir);
     return info;
 }
 
 QString GitRepository::readGitignore() const
 {
-    if (!m_valid)
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid)
         return {};
-    QFile file(QDir(m_rootPath).filePath(QStringLiteral(".gitignore")));
+    QFile file(QDir(location.rootPath).filePath(QStringLiteral(".gitignore")));
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return {};
     return QString::fromUtf8(file.readAll());
@@ -1435,11 +1602,12 @@ OperationResult GitRepository::writeGitignore(const QString &content)
 {
     OperationResult result;
     result.command = tr("# edited .gitignore (file operation, no Git command)");
-    if (!m_valid) {
+    const RepoLocation location = snapshotLocation();
+    if (!location.valid) {
         result.message = tr("No repository is open.");
         return result;
     }
-    QFile file(QDir(m_rootPath).filePath(QStringLiteral(".gitignore")));
+    QFile file(QDir(location.rootPath).filePath(QStringLiteral(".gitignore")));
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
         result.message = tr("Could not write .gitignore: %1").arg(file.errorString());
         return result;

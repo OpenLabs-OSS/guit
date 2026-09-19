@@ -20,13 +20,20 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     , m_diff(new DiffViewer(this))
     , m_commandLabel(new QLabel(this))
     , m_remoteBox(new QComboBox(this))
+    , m_loadingBar(new QProgressBar(this))
 {
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
     m_infoLabel->setWordWrap(true);
     m_infoLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setWordWrap(true);
     Theme::applyMono(m_commandLabel);
     m_remoteBox->addItems(remoteNames);
+    m_tagList->setAlternatingRowColors(true);
+    m_tagList->setUniformItemSizes(true);
 
     auto *newButton = new QPushButton(tr("New…"), this);
     auto *inspectButton = new QPushButton(tr("Inspect"), this);
@@ -75,6 +82,7 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
     layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_loadingBar);
     layout->addWidget(splitter);
 
     connect(m_controller, &TagController::tagsChanged, this, &TagsPage::onTagsChanged);
@@ -88,7 +96,16 @@ TagsPage::TagsPage(TagController *controller, const QStringList &remoteNames, QW
     connect(refreshButton, &QPushButton::clicked, this, &TagsPage::refresh);
     connect(m_tagList, &QListWidget::itemSelectionChanged, this, &TagsPage::onInspect);
     connect(m_filterBox, &QLineEdit::textChanged, this, [this]() { onTagsChanged(m_tags); });
+    connect(m_controller, &TagController::loadingChanged, this, &TagsPage::setLoading);
     m_tagList->setAlternatingRowColors(true);
+    m_actionButtons = {newButton, inspectButton, deleteButton, pushButton, refreshButton};
+}
+
+void TagsPage::setLoading(bool loading)
+{
+    m_loadingBar->setVisible(loading);
+    for (QPushButton *button : m_actionButtons)
+        button->setEnabled(!loading);
 }
 
 void TagsPage::setRemoteNames(const QStringList &remotes)

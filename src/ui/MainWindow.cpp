@@ -81,7 +81,9 @@ MainWindow::MainWindow(RepositoryController *controller,
     splitter->addWidget(m_stack);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({220, 880});
+    // No setSizes() here: pre-show pixel sizes fight the sidebar's fixed
+    // width and produce layout races on first show. Stretch factors plus
+    // the sidebar width alone determine the initial split deterministically.
     setCentralWidget(splitter);
 
     // Git command log: every executed operation records its exact command

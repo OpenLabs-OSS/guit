@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AsyncController.h"
 #include "../git/AdvancedModels.h"
 #include "../git/GitRepository.h"
 
@@ -9,10 +10,11 @@
 namespace Guit
 {
 
-// Coordinates remote configuration (sync) and fetch/pull/push (async with
-// progress). Network outcomes arrive via networkFinished; authentication is
-// handled by Git's credential helpers — failures surface as messages.
-class RemoteController : public QObject
+// Coordinates remote configuration and fetch/pull/push. Local remote
+// bookkeeping runs on the background queue; network transfers keep their
+// dedicated async process with progress. Authentication is handled by
+// Git's credential helpers — failures surface as messages.
+class RemoteController : public AsyncController
 {
     Q_OBJECT
 
@@ -44,7 +46,7 @@ signals:
     void headChanged();
 
 private:
-    void handleResult(const OperationResult &result);
+    void reloadAfter(const OperationResult &result);
 
     GitRepository *m_repository = nullptr;
     QList<RemoteInfo> m_remotes;

@@ -25,7 +25,8 @@ GitignoreDialog::GitignoreDialog(RepositoryInfoController *controller, const QSt
 
     auto *presetBox = new QComboBox(this);
     presetBox->addItem(tr("Add common patterns…"));
-    for (auto it = GitRepository::gitignorePresets().constBegin(); it != GitRepository::gitignorePresets().constEnd(); ++it)
+    const QMap<QString, QStringList> presets = GitRepository::gitignorePresets();
+    for (auto it = presets.constBegin(); it != presets.constEnd(); ++it)
         presetBox->addItem(it.key());
     auto *addButton = new QPushButton(tr("Add"), this);
 

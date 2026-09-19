@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
 #include <QWidget>
@@ -41,6 +42,9 @@ private slots:
     void onMerge();
     void onRebase();
     void applyFilter();
+    void setLoading(bool loading);
+    void setMergeLoading(bool loading);
+    void updateLoading();
     void onBranchFailed(const QString &reason, const QString &details, const QString &command);
 
 private:
@@ -55,6 +59,10 @@ private:
     DiffViewer *m_diff = nullptr;
     QLabel *m_commandLabel = nullptr;
     QLineEdit *m_filterBox = nullptr;
+    QProgressBar *m_loadingBar = nullptr;
+    QList<QPushButton *> m_actionButtons;
+    bool m_branchBusy = false;
+    bool m_mergeBusy = false;
     QList<BranchInfo> m_branches;
     QString m_pendingForceDelete;
 };

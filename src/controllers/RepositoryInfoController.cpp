@@ -4,61 +4,93 @@ namespace Guit
 {
 
 RepositoryInfoController::RepositoryInfoController(GitRepository *repository, QObject *parent)
-    : QObject(parent)
+    : AsyncController(parent)
     , m_repository(repository)
 {
 }
 
 void RepositoryInfoController::refresh()
 {
-    emit infoChanged(m_repository->repositoryInfo(), m_repository->lfsInfo(), m_repository->submodules(),
-                     m_repository->worktrees(), m_repository->reflog(), m_repository->readGitignore());
+    GitRepository *repository = m_repository;
+    submit<InfoBundle>(
+        [repository]() {
+            InfoBundle bundle;
+            bundle.info = repository->repositoryInfo();
+            bundle.lfs = repository->lfsInfo();
+            bundle.submodules = repository->submodules();
+            bundle.worktrees = repository->worktrees();
+            bundle.reflog = repository->reflog();
+            bundle.gitignore = repository->readGitignore();
+            return bundle;
+        },
+        [this](const InfoBundle &bundle) {
+            emit infoChanged(bundle.info, bundle.lfs, bundle.submodules, bundle.worktrees, bundle.reflog,
+                             bundle.gitignore);
+            emit loadingChanged(false);
+        });
 }
 
 void RepositoryInfoController::updateSubmodules(bool initialize)
 {
-    handleResult(m_repository->submoduleUpdate(initialize));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, initialize]() { return repository->submoduleUpdate(initialize); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RepositoryInfoController::syncSubmodules()
 {
-    handleResult(m_repository->submoduleSync());
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository]() { return repository->submoduleSync(); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RepositoryInfoController::addWorktree(const QString &path, const QString &source, bool newBranch)
 {
-    handleResult(m_repository->worktreeAdd(path, source, newBranch));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, path, source, newBranch]() {
+        return repository->worktreeAdd(path, source, newBranch);
+    },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RepositoryInfoController::removeWorktree(const QString &path, bool force)
 {
-    handleResult(m_repository->worktreeRemove(path, force));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, path, force]() { return repository->worktreeRemove(path, force); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RepositoryInfoController::pruneWorktrees()
 {
-    handleResult(m_repository->worktreePrune());
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository]() { return repository->worktreePrune(); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RepositoryInfoController::trackLfs(const QString &pattern)
 {
-    handleResult(m_repository->lfsTrack(pattern));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, pattern]() { return repository->lfsTrack(pattern); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void RepositoryInfoController::saveGitignore(const QString &content)
 {
-    handleResult(m_repository->writeGitignore(content));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, content]() { return repository->writeGitignore(content); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
-void RepositoryInfoController::handleResult(const OperationResult &result)
+void RepositoryInfoController::reloadAfter(const OperationResult &result)
 {
-    refresh();
-    m_repository->refreshHead();
-    emit headChanged();
-    if (result.ok)
-        emit operationDone(result.message, result.command);
-    else
+    if (!result.ok) {
+        emit loadingChanged(false);
         emit operationFailed(result.message, {}, result.command);
+        return;
+    }
+    refresh();
+    emit headChanged();
+    emit operationDone(result.message, result.command);
 }
 
 } // namespace Guit

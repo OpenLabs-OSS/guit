@@ -26,7 +26,14 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     , m_pullButton(new QPushButton(tr("Pull"), this))
     , m_pushButton(new QPushButton(tr("Push…"), this))
     , m_deleteButton(new QPushButton(tr("Delete Remote Branch…"), this))
+    , m_loadingBar(new QProgressBar(this))
 {
+    m_loadingBar->setRange(0, 0);
+    m_loadingBar->setTextVisible(false);
+    m_loadingBar->setFixedHeight(3);
+    m_loadingBar->setVisible(false);
+    m_remoteList->setAlternatingRowColors(true);
+    m_remoteList->setUniformItemSizes(true);
     m_detailLabel->setWordWrap(true);
     m_detailLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_commandLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -81,10 +88,12 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     splitter->setSizes({300, 700});
 
     m_remoteList->setAlternatingRowColors(true);
+    m_remoteList->setUniformItemSizes(true);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(Theme::pageMargin(), Theme::sectionSpacing(), Theme::pageMargin(), Theme::pageMargin());
     layout->setSpacing(Theme::controlSpacing());
+    layout->addWidget(m_loadingBar);
     layout->addWidget(splitter);
 
     connect(m_controller, &RemoteController::remotesChanged, this, &RemotesPage::onRemotesChanged);
@@ -102,6 +111,14 @@ RemotesPage::RemotesPage(RemoteController *controller, BranchController *branche
     connect(refreshButton, &QPushButton::clicked, this, &RemotesPage::refresh);
     connect(m_controller, &RemoteController::networkStarted, this, [this](const QString &) { setNetworkActive(true); });
     connect(m_controller, &RemoteController::networkFinished, this, [this](const OperationResult &) { setNetworkActive(false); });
+    connect(m_controller, &RemoteController::loadingChanged, this, &RemotesPage::setLoading);
+}
+
+void RemotesPage::setLoading(bool loading)
+{
+    // Local bookkeeping loads share the bar; network transfers use the
+    // modal progress dialog instead (and disable these buttons separately).
+    m_loadingBar->setVisible(loading);
 }
 
 void RemotesPage::setNetworkActive(bool active)

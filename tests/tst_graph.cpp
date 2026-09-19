@@ -64,15 +64,26 @@ private slots:
         }
     }
 
-    void survivesUnknownParents()
+    void terminatesUnknownParentsAtBoundary()
     {
-        // Parent outside the loaded window: line runs off the bottom.
+        // Parent outside the loaded window: the line ends at this row
+        // instead of running into another commit's row.
         const QList<CommitInfo> commits = {makeCommit(QStringLiteral("c2"), {QStringLiteral("c1-missing")})};
         const QList<GraphRow> rows = GraphLanes::compute(commits);
         QCOMPARE(rows.size(), 1);
         QCOMPARE(rows.at(0).dotLane, 0);
+        QVERIFY(rows.at(0).segments.isEmpty());
+    }
+
+    void terminatesUnknownMergeParent()
+    {
+        // One known parent joins normally; the unknown one terminates.
+        const QList<CommitInfo> commits = {makeCommit(QStringLiteral("mx"), {QStringLiteral("m1"), QStringLiteral("ghost")}),
+                                           makeCommit(QStringLiteral("m1"))};
+        const QList<GraphRow> rows = GraphLanes::compute(commits);
+        QCOMPARE(rows.size(), 2);
         QCOMPARE(rows.at(0).segments.size(), 1);
-        QCOMPARE(rows.at(0).segments.at(0).rowB, 1);
+        QCOMPARE(rows.at(0).segments.at(0).laneB, 0);
     }
 
     void handlesEmptyInput()

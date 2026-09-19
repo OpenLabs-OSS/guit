@@ -4,56 +4,89 @@ namespace Guit
 {
 
 StashController::StashController(GitRepository *repository, QObject *parent)
-    : QObject(parent)
+    : AsyncController(parent)
     , m_repository(repository)
 {
 }
 
 void StashController::refresh()
 {
-    m_entries = m_repository->stashList();
-    emit stashChanged(m_entries);
+    GitRepository *repository = m_repository;
+    submit<QList<StashInfo>>([repository]() { return repository->stashList(); },
+                             [this](const QList<StashInfo> &entries) {
+                                 m_entries = entries;
+                                 emit stashChanged(m_entries);
+                                 emit loadingChanged(false);
+                             });
 }
 
 void StashController::save(const QString &message, bool includeUntracked)
 {
-    handleResult(m_repository->stashPush(message, includeUntracked));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, message, includeUntracked]() {
+        return repository->stashPush(message, includeUntracked);
+    },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void StashController::apply(const QString &stashRef)
 {
-    handleResult(m_repository->stashApply(stashRef));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, stashRef]() { return repository->stashApply(stashRef); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void StashController::pop(const QString &stashRef)
 {
-    handleResult(m_repository->stashPop(stashRef));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, stashRef]() { return repository->stashPop(stashRef); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void StashController::drop(const QString &stashRef)
 {
-    handleResult(m_repository->stashDrop(stashRef));
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository, stashRef]() { return repository->stashDrop(stashRef); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void StashController::clear()
 {
-    handleResult(m_repository->stashClear());
+    GitRepository *repository = m_repository;
+    submit<OperationResult>([repository]() { return repository->stashClear(); },
+                            [this](const OperationResult &result) { reloadAfter(result); });
 }
 
 void StashController::inspect(const QString &stashRef)
 {
-    emit stashDetails(stashRef, m_repository->stashShow(stashRef));
+    GitRepository *repository = m_repository;
+    submit<QList<FileDiff>>([repository, stashRef]() { return repository->stashShow(stashRef); },
+                             [this, stashRef](const QList<FileDiff> &diffs) {
+                                 emit stashDetails(stashRef, diffs);
+                                 emit loadingChanged(false);
+                             });
 }
 
-void StashController::handleResult(const OperationResult &result)
+void StashController::reloadAfter(const OperationResult &result)
 {
-    refresh();
-    m_repository->refreshHead();
-    emit headChanged();
-    if (result.ok)
-        emit stashOperationDone(result.message, result.command);
-    else
+    if (!result.ok) {
+        emit loadingChanged(false);
         emit operationFailed(result.message, {}, result.command);
+        return;
+    }
+    GitRepository *repository = m_repository;
+    submit<QList<StashInfo>>(
+        [repository]() {
+            repository->refreshHead();
+            return repository->stashList();
+        },
+        [this, result](const QList<StashInfo> &entries) {
+            m_entries = entries;
+            emit stashChanged(m_entries);
+            emit headChanged();
+            emit stashOperationDone(result.message, result.command);
+            emit loadingChanged(false);
+        });
 }
 
 } // namespace Guit
