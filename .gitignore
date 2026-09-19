@@ -3,6 +3,7 @@
 build/
 out/
 cmake-build-*/
+build-release/
 
 # Compiled binaries
 

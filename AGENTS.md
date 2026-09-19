@@ -647,29 +647,604 @@ Implement:
 
 ---
 
-## Milestone 5 — Release
+**## Milestone 5 — Release Engineering and Public Release**
 
-Implement:
+Milestone 5 transforms the completed Guit application into a reproducible, distributable, production-quality open-source Windows application.
 
-- comprehensive tests
-- edge-case testing
-- performance improvements
-- accessibility improvements
-- GitHub Actions CI
-- Windows build pipeline
-- packaging
-- release configuration
-- README
-- CONTRIBUTING
-- CODE_OF_CONDUCT
-- SECURITY
-- architecture documentation
-- development documentation
-- Git concepts documentation
+The goal is not to add large new Git features. The goal is to make the existing application reliable, testable, buildable, distributable, and ready for public GitHub release.
 
-Perform a final production-readiness review.
+The agent should work autonomously through the entire milestone and must not stop after individual tasks. Build and test after each major subsystem, fix problems, and continue.
 
 ---
+
+### 5.1 Release Baseline
+
+Before making changes:
+
+1. Inspect the complete repository.
+2. Inspect the current Git status and diff.
+3. Review the existing build configuration.
+4. Review existing tests.
+5. Review the existing deployment configuration.
+6. Build the current Release configuration.
+7. Run the complete existing test suite.
+8. Record any existing failures or warnings.
+
+Do not discard working functionality.
+
+Do not rewrite working architecture merely to make the release system look different.
+
+The manually verified deployment is the baseline for the automated deployment system.
+
+The current known-good Windows deployment contains:
+
+```text
+guit.exe
+Qt6Core.dll
+Qt6Gui.dll
+Qt6Widgets.dll
+libgcc_s_seh-1.dll
+libstdc++-6.dll
+libwinpthread-1.dll
+platforms/
+└── qwindows.dll
+```
+
+The automated deployment must reproduce an equivalent working package.
+
+---
+
+### 5.2 Release Build Configuration
+
+Create a reliable Windows Release build using:
+
+- C++20
+- Qt 6
+- CMake
+- Ninja
+- MinGW-w64
+
+The documented Release workflow should work from a clean checkout.
+
+Example:
+
+```text
+cmake -S . -B build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+ctest --test-dir build-release --output-on-failure
+```
+
+Do not require MSVC, Visual Studio, or NMake.
+
+Do not hard-code the user's local Qt installation path into the repository.
+
+If Qt discovery requires an environment variable or documented CMake configuration, document it clearly.
+
+---
+
+### 5.3 Automated Qt and MinGW Deployment
+
+Fix and improve the existing CMake deployment target.
+
+The final project must not require manually copying DLLs for every release.
+
+A command such as:
+
+```text
+cmake --build build-release --target deploy
+```
+
+should create a complete runnable deployment directory.
+
+The deployment system must:
+
+1. Copy the Guit executable.
+2. Deploy required Qt runtime DLLs.
+3. Deploy required MinGW runtime DLLs.
+4. Deploy required Qt plugins.
+5. Deploy the Windows platform plugin:
+
+```text
+platforms/qwindows.dll
+```
+
+6. Preserve the directory structure required by Qt.
+7. Fail clearly if required deployment files cannot be found.
+8. Never silently produce an incomplete deployment.
+
+The previously discovered `windeployqt` platform-plugin discovery problem must be handled robustly.
+
+Do not rely on a development machine's PATH after deployment.
+
+Do not copy unrelated Qt plugins unnecessarily.
+
+The resulting deployment must run on a machine that does not have the Guit development environment installed.
+
+---
+
+### 5.4 Deployment Validation
+
+Add a deployment validation step.
+
+It should verify at minimum:
+
+```text
+guit.exe
+Qt6Core.dll
+Qt6Gui.dll
+Qt6Widgets.dll
+libgcc_s_seh-1.dll
+libstdc++-6.dll
+libwinpthread-1.dll
+platforms/qwindows.dll
+```
+
+If a required dependency is missing, deployment validation must fail rather than producing a package that appears successful but cannot launch.
+
+Where practical, validate the executable's runtime dependencies rather than relying only on filenames.
+
+---
+
+### 5.5 Portable Windows Package
+
+Create a reproducible portable package.
+
+The package should have a predictable name such as:
+
+```text
+Guit-<version>-windows-x64.zip
+```
+
+It must contain only the files necessary to run Guit.
+
+It must not contain:
+
+- source code
+- build files
+- CMake cache files
+- test repositories
+- development logs
+- compiler intermediate files
+- personal paths
+- IDE files
+
+The ZIP must be tested after extraction into a clean directory.
+
+---
+
+### 5.6 Windows Installer
+
+Add a Windows installer.
+
+Use a lightweight and well-established Windows installer technology such as Inno Setup unless an existing project constraint makes another solution more appropriate.
+
+The installer should:
+
+- install Guit
+- install all required runtime files
+- create Start Menu shortcuts
+- optionally create a desktop shortcut
+- register an uninstaller
+- support upgrading a previous Guit installation
+- preserve appropriate user configuration when upgrading
+- allow the user to choose the installation directory
+- launch Guit optionally after installation
+- uninstall cleanly
+
+Do not bundle Git itself unless explicitly required.
+
+Guit must continue to use the user's installed Git executable.
+
+The installer must not store Git credentials.
+
+---
+
+### 5.7 Versioning
+
+Introduce a single authoritative application version.
+
+The version should be used consistently by:
+
+- the application
+- CMake
+- package names
+- installer
+- GitHub release artifacts
+- About dialog where applicable
+
+Do not duplicate version strings unnecessarily.
+
+Prepare the project for semantic-style releases such as:
+
+```text
+v0.1.0
+v0.2.0
+v1.0.0
+```
+
+Do not claim API stability merely because semantic versioning is used.
+
+---
+
+### 5.8 Automated Tests
+
+Expand the existing test suite where useful.
+
+Tests must cover important existing functionality and edge cases.
+
+At minimum consider:
+
+#### Git
+
+- Git executable detection
+- Git unavailable
+- process startup failure
+- non-zero exit codes
+- stdout/stderr handling
+- cancellation where supported
+
+#### Repositories
+
+- valid repository
+- invalid directory
+- empty repository
+- repository with no commits
+- repository with many commits
+- repository with uncommitted changes
+- repository with staged changes
+- repository with deleted files
+- repository with renamed files
+- repository with unusual filenames
+
+#### Branches
+
+- branch creation
+- switching
+- rename
+- deletion
+- branch comparison
+- detached HEAD
+
+#### History
+
+- normal history
+- multiple branches
+- merge commits
+- root commit
+- empty history
+- graph boundaries
+
+#### Remotes
+
+- no remotes
+- one remote
+- multiple remotes
+- invalid remote
+- fetch/pull/push failures
+
+#### Stashes
+
+- no stash
+- one stash
+- multiple stashes
+- stash creation
+- stash application
+- stash deletion
+
+#### Merge/Rebase
+
+- successful operation
+- conflict
+- aborted operation
+- invalid operation
+
+#### UI/state
+
+- opening repositories
+- switching pages
+- loading states
+- empty states
+- error states
+- `.gitignore` handling
+- startup behavior
+
+Tests must never modify the user's real repositories.
+
+Use temporary deterministic repositories.
+
+---
+
+### 5.9 Compiler Warnings
+
+Release builds should be reviewed for compiler warnings.
+
+Fix warnings introduced by Guit's code whenever practical.
+
+Do not suppress warnings globally merely to make the build appear clean.
+
+Warnings that are intentionally retained must have a documented reason.
+
+---
+
+### 5.10 Performance and Responsiveness
+
+Perform a final performance audit.
+
+Pay particular attention to:
+
+- repository opening
+- large repositories
+- history loading
+- graph generation
+- large diffs
+- status loading
+- branch loading
+- remote operations
+- filesystem scanning
+- page navigation
+
+No normal user action should unnecessarily freeze the GUI.
+
+Do not introduce unnecessary background threads.
+
+Do not access QWidget objects from worker threads.
+
+Preserve the existing asynchronous architecture.
+
+---
+
+### 5.11 Stability and Crash Audit
+
+Perform a final crash/stability audit.
+
+Test at minimum:
+
+- application startup
+- opening valid repository
+- opening invalid directory
+- opening `.git` directory
+- switching pages repeatedly
+- rapidly switching pages while loading
+- closing during a Git operation
+- `.gitignore` dialog
+- empty repository
+- repository with no `.gitignore`
+- repository with an empty `.gitignore`
+- repository with a large `.gitignore`
+- missing Git executable
+- failed Git commands
+- deleted/moved repository
+- inaccessible repository
+
+Fix root causes rather than hiding crashes with generic exception handling or excessive null checks.
+
+---
+
+### 5.12 GitHub Actions CI
+
+Create GitHub Actions CI.
+
+At minimum CI should:
+
+1. Check out the repository.
+2. Configure the project.
+3. Build it.
+4. Run tests.
+5. Report failures clearly.
+
+The Windows CI environment must use the project's supported toolchain.
+
+Do not introduce MSVC if MinGW-w64 is the supported Windows compiler.
+
+Keep CI configuration maintainable.
+
+If Qt installation/setup is required, use a stable documented approach.
+
+---
+
+### 5.13 Release Workflow
+
+Create a GitHub Actions release workflow capable of producing release artifacts.
+
+The intended flow is:
+
+```text
+Git tag
+   ↓
+Release workflow
+   ↓
+Configure
+   ↓
+Build Release
+   ↓
+Run tests
+   ↓
+Deploy Qt + MinGW
+   ↓
+Validate deployment
+   ↓
+Create portable ZIP
+   ↓
+Build Windows installer
+   ↓
+Generate checksums
+   ↓
+Upload release artifacts
+```
+
+Do not automatically publish a real public release during development unless explicitly requested by the user.
+
+The workflow should be safe to test without publishing a release.
+
+---
+
+### 5.14 Checksums
+
+Generate SHA-256 checksums for release artifacts.
+
+For example:
+
+```text
+Guit-0.1.0-windows-x64.zip
+Guit-0.1.0-windows-x64-Setup.exe
+```
+
+Produce a checksum file or equivalent release metadata.
+
+Do not claim cryptographic signing unless signing is actually implemented.
+
+---
+
+### 5.15 Documentation
+
+Prepare the repository for public developers and users.
+
+At minimum provide:
+
+```text
+README.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+```
+
+Also maintain appropriate documentation for:
+
+- architecture
+- building from source
+- development setup
+- testing
+- Git concepts
+- deployment/release process
+
+README should explain:
+
+- what Guit is
+- who it is for
+- major features
+- screenshots or visual examples where appropriate
+- supported platform
+- requirements
+- installation
+- building from source
+- testing
+- contributing
+- license
+- project status
+
+Do not claim features that do not actually work.
+
+---
+
+### 5.16 Public Repository Audit
+
+Before declaring the milestone complete, inspect the entire repository for:
+
+- secrets
+- credentials
+- API keys
+- personal paths
+- generated binaries
+- build directories
+- test repositories
+- temporary files
+- IDE files
+- unnecessary generated files
+- accidental large files
+
+Verify `.gitignore`.
+
+Review:
+
+```text
+git status
+git diff
+git ls-files
+```
+
+Search source and documentation for accidental local machine paths.
+
+Do not commit release binaries unless the release process specifically requires them.
+
+---
+
+### 5.17 Clean-Machine Verification
+
+Perform a final clean-environment test.
+
+The portable deployment must run without requiring:
+
+- Qt installation
+- MinGW installation
+- CMake
+- Ninja
+- Qt Creator
+- Visual Studio
+- project source tree
+
+Git may remain an external prerequisite because Guit intentionally uses the user's installed Git executable.
+
+Verify that Guit produces a clear error when Git is unavailable.
+
+---
+
+### 5.18 Final Release Checklist
+
+Before completing Milestone 5, verify:
+
+- [ ] Clean Release configuration succeeds.
+- [ ] Release compilation succeeds.
+- [ ] All tests pass.
+- [ ] No known reproducible crash remains.
+- [ ] No known normal-use UI freeze remains.
+- [ ] Deployment is automated.
+- [ ] Deployment validation succeeds.
+- [ ] Portable ZIP works.
+- [ ] Windows installer works.
+- [ ] Installer uninstall works.
+- [ ] Upgrade installation works.
+- [ ] Git remains an external dependency.
+- [ ] CI passes.
+- [ ] Release workflow is functional.
+- [ ] SHA-256 checksums are generated.
+- [ ] README is complete.
+- [ ] CONTRIBUTING exists.
+- [ ] CODE_OF_CONDUCT exists.
+- [ ] SECURITY exists.
+- [ ] Architecture documentation is current.
+- [ ] Development documentation is current.
+- [ ] No secrets are present.
+- [ ] No personal development paths are present.
+- [ ] No generated build artifacts are accidentally tracked.
+- [ ] Git working tree is clean after intended commits.
+- [ ] Release artifacts have been tested outside the development environment.
+
+Only after all applicable items are satisfied should the milestone be considered complete.
+
+---
+
+### 5.19 Public Release Readiness
+
+Milestone 5 completion means Guit is technically prepared for a public GitHub release.
+
+Do not publish a GitHub release automatically unless explicitly requested.
+
+At completion, provide the user with:
+
+1. Build status.
+2. Test results.
+3. CI status.
+4. Deployment status.
+5. Installer status.
+6. Portable package status.
+7. Documentation status.
+8. Known limitations.
+9. Recommended version number.
+10. Exact remaining steps, if any, before the first public release.
+
+Do not declare Guit production-ready if important checklist items remain incomplete.
+
+Do not hide known problems merely to complete the milestone.
 
 # 21. Git Commit Strategy
 
