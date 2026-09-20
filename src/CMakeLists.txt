@@ -104,7 +104,10 @@ add_library(guit_core STATIC
     ui/MainWindow.cpp
 )
 
-target_include_directories(guit_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_include_directories(guit_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+    ${CMAKE_BINARY_DIR}/src/app
+)
 target_link_libraries(guit_core PUBLIC Qt6::Core Qt6::Widgets Qt6::Concurrent)
 
 target_compile_options(guit_core PRIVATE

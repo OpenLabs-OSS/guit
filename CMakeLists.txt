@@ -6,6 +6,12 @@ project(Guit
     LANGUAGES CXX
 )
 
+# Split version into components for the version header
+set(GUIT_VERSION_MAJOR 0)
+set(GUIT_VERSION_MINOR 1)
+set(GUIT_VERSION_PATCH 0)
+set(GUIT_VERSION_STRING "${GUIT_VERSION_MAJOR}.${GUIT_VERSION_MINOR}.${GUIT_VERSION_PATCH}")
+
 option(GUIT_BUILD_TESTS "Build the Guit test suite" ON)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,6 +26,12 @@ set(CMAKE_AUTORCC ON)
 # Concurrent powers the single-threaded background queue for Git reads
 # (controllers stay responsive; see docs/architecture.md).
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets Concurrent)
+
+# Configure version header for the application
+configure_file(
+    "${CMAKE_SOURCE_DIR}/src/app/Version.h.in"
+    "${CMAKE_BINARY_DIR}/src/app/Version.h"
+)
 
 if(GUIT_BUILD_TESTS)
     find_package(Qt6 REQUIRED COMPONENTS Test)

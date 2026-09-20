@@ -1,3 +1,4 @@
+#include "Version.h"
 #include "../app/AppSettings.h"
 #include "../app/ThemeManager.h"
 #include "../controllers/BranchController.h"
@@ -25,7 +26,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("Guit"));
     QCoreApplication::setApplicationName(QStringLiteral("Guit"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral(GUIT_VERSION_STRING));
 
     Guit::AppSettings settings;
     Guit::ThemeManager themes(&settings);

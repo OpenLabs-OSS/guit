@@ -12,8 +12,16 @@ function(add_guit_test target source)
     get_filename_component(compilerBinDir "${CMAKE_CXX_COMPILER}" DIRECTORY)
     set(parentPath "$ENV{PATH}")
     string(REPLACE ";" "\\;" parentPath "${parentPath}")
+    # Set QT_TESTCASE_BUILDDIR to a safe relative path to avoid issues with
+    # backslash escaping and drive letter colons in QtTest macros.
+    file(TO_NATIVE_PATH "${CMAKE_CURRENT_BINARY_DIR}" nativeBuildDir)
+    string(REPLACE "\\" "/" unixBuildDir "${nativeBuildDir}")
+    # Get the relative path from the build root to the test build dir
+    file(RELATIVE_PATH relBuildDir "${CMAKE_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+    string(REPLACE "\\" "/" safeBuildDir "${relBuildDir}")
     set_tests_properties(${target} PROPERTIES
-        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>\;${compilerBinDir}\;${parentPath}")
+        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:Qt6::Core>\;${compilerBinDir}\;${parentPath};QT_TESTCASE_BUILDDIR=${safeBuildDir}"
+    )
 endfunction()
 
 add_guit_test(tst_gitprocess tst_gitprocess.cpp)

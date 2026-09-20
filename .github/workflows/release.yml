@@ -1,0 +1,133 @@
+# Guit Release Workflow
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Qt
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: 6.5
+          host: windows
+          target: desktop
+          arch: win64_mingw
+          modules: qtbase qtsvg qttools
+          cache: true
+
+      - name: Setup MinGW
+        uses: ilammy/setup-mingw@v2
+        with:
+          version: 13.1
+          threads: posix
+          exception: seh
+
+      - name: Setup Ninja
+        run: |
+          choco install ninja --version 1.12.1 --no-progress
+          echo "C:\Program Files\Ninja" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup CMake
+        run: |
+          choco install cmake --version 3.28.1 --no-progress
+          echo "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Setup Git
+        run: |
+          choco install git --version 2.45.0 --no-progress
+          echo "C:\Program Files\Git\cmd" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1310_64/bin/g++.exe \
+            -DCMAKE_PREFIX_PATH=C:/Qt/6.5/mingw_64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Run Tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Deploy
+        run: cmake --build build --target deploy
+
+      - name: Create Portable Package
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          Compress-Archive -Path build/deploy/* -DestinationPath "build/Guit-${version}-windows-x64.zip" -Force
+
+      - name: Build Installer
+        run: cmake --build build --target installer
+
+      - name: Generate Checksums
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $zipHash = Get-FileHash -Algorithm SHA256 "build/Guit-${version}-windows-x64.zip"
+          $exeHash = Get-FileHash -Algorithm SHA256 "build/deploy/guit.exe"
+          $installerHash = Get-FileHash -Algorithm SHA256 "build/installer/Guit-${version}-windows-x64-Setup.exe"
+          @"
+          # SHA256 Checksums for Guit $version Release Artifacts
+
+          ## Portable Package
+          SHA256(Guit-$version-windows-x64.zip) = $($zipHash.Hash)
+
+          ## Deployed Executable
+          SHA256(guit.exe) = $($exeHash.Hash)
+
+          ## Installer
+          SHA256(Guit-$version-windows-x64-Setup.exe) = $($installerHash.Hash)
+          "@ | Out-File -FilePath build/checksums.txt -Encoding utf8
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Guit ${{ github.ref_name }}
+          body: |
+            ## Guit ${{ github.ref_name }}
+
+            ### Changes
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+
+            ### Downloads
+            - [Portable Package (Windows x64)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Guit-${{ github.ref_name }}-windows-x64.zip)
+            - [Installer (Windows x64)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Guit-${{ github.ref_name }}-windows-x64-Setup.exe)
+
+            ### Verification
+            ```text
+            SHA256(Guit-${{ github.ref_name }}.zip) = <from checksums.txt>
+            SHA256(guit.exe) = <from checksums.txt>
+            SHA256(Guit-${{ github.ref_name }}-Setup.exe) = <from checksums.txt>
+            ```
+
+            ### Requirements
+            - Windows 10/11
+            - Git for Windows (installed separately)
+
+          draft: false
+          prerelease: false
+          files: |
+            build/Guit-*-windows-x64.zip
+            build/installer/Guit-*-windows-x64-Setup.exe
+            build/checksums.txt
+            build/deploy/guit.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
