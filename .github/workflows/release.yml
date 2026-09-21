@@ -199,8 +199,6 @@ jobs:
 
             SHA-256 checksums are provided in `SHA256SUMS.txt`.
 
-            See the full changelog in [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md).
-
           files: |
             build/Guit-*-windows-x64.zip
             build/installer/Guit-*-windows-x64-Setup.exe
