@@ -3,14 +3,16 @@
 ; Requires Inno Setup 6+
 
 #define AppName "Guit"
-#define AppVersion "0.1.0"
+#ifndef AppVersion
+  #define AppVersion "0.1.0"
+#endif
 #define AppPublisher "OpenLabs"
 #define AppURL "https://github.com/OpenLabs-OSS/guit"
 #define AppSupportURL "https://github.com/OpenLabs-OSS/guit/issues"
 #define AppUpdatesURL "https://github.com/OpenLabs-OSS/guit/releases"
 #define AppContact "openlabs-oss@protonmail.com"
 #define AppExeName "guit.exe"
-#define DeployDir "..\build-release\deploy"
+#define DeployDir "..\build\deploy"
 
 [Setup]
 AppId={{8F3A2B1C-7D4E-4F9A-B6C3-1E2D8F7A4B5C}
@@ -24,7 +26,7 @@ AppContact={#AppContact}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
-OutputDir=..\build-release\installer
+OutputDir=..\build\installer
 OutputBaseFilename=Guit-{#AppVersion}-windows-x64-Setup
 Compression=lzma/ultra64
 SolidCompression=yes
@@ -58,10 +60,6 @@ Filename: "{app}\unins000.exe"; RunOnceId: "guit_uninstall"
 
 [Registry]
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#AppExeName}"; ValueType: string; ValueData: "{app}\{#AppExeName}"; Flags: uninsdeletevalue
-
-[Messages]
-; Custom messages for the installer
-; (none)
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);

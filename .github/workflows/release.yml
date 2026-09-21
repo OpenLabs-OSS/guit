@@ -55,6 +55,9 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
+
+          Write-Host "Release version: $version"
+
           "version=$version" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
 
@@ -63,13 +66,67 @@ jobs:
         run: |
           $version = "${{ steps.version.outputs.version }}"
 
+          $zip = "build/Guit-$version-windows-x64.zip"
+
           Compress-Archive `
             -Path build/deploy/* `
-            -DestinationPath "build/Guit-$version-windows-x64.zip" `
+            -DestinationPath $zip `
             -Force
 
+          if (-not (Test-Path $zip)) {
+            Write-Error "Portable package was not created."
+            exit 1
+          }
+
+          Write-Host "Created: $zip"
+
+      - name: Setup Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress
+
       - name: Build Installer
-        run: cmake --build build --target installer --config Release
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+
+          if (-not (Test-Path $iscc)) {
+            $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+
+          if (-not (Test-Path $iscc)) {
+            Write-Error "Inno Setup compiler (ISCC.exe) was not found."
+            exit 1
+          }
+
+          Write-Host "Using Inno Setup: $iscc"
+
+          & $iscc `
+            "/DMyAppVersion=$version" `
+            "installer\guit.iss"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Inno Setup failed with exit code $LASTEXITCODE."
+            exit $LASTEXITCODE
+          }
+
+      - name: Verify Installer
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $installer = "build/installer/Guit-$version-windows-x64-Setup.exe"
+
+          if (-not (Test-Path $installer)) {
+            Write-Error "Installer was not found at: $installer"
+            Write-Host "Installer directory contents:"
+            Get-ChildItem -Recurse build/installer -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+          Write-Host "Installer created successfully:"
+          Get-Item $installer
 
       - name: Generate Checksums
         shell: pwsh
@@ -79,6 +136,21 @@ jobs:
           $zip = "build/Guit-$version-windows-x64.zip"
           $exe = "build/deploy/guit.exe"
           $installer = "build/installer/Guit-$version-windows-x64-Setup.exe"
+
+          if (-not (Test-Path $zip)) {
+            Write-Error "Missing portable package: $zip"
+            exit 1
+          }
+
+          if (-not (Test-Path $exe)) {
+            Write-Error "Missing executable: $exe"
+            exit 1
+          }
+
+          if (-not (Test-Path $installer)) {
+            Write-Error "Missing installer: $installer"
+            exit 1
+          }
 
           $zipHash = (Get-FileHash -Algorithm SHA256 $zip).Hash
           $exeHash = (Get-FileHash -Algorithm SHA256 $exe).Hash
@@ -93,6 +165,10 @@ jobs:
           "@ | Out-File `
             -FilePath build/SHA256SUMS.txt `
             -Encoding utf8
+
+          Write-Host ""
+          Write-Host "SHA-256 checksums:"
+          Get-Content build/SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
