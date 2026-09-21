@@ -1,4 +1,4 @@
-# Security Policy
+﻿# Security Policy
 
 ## Supported Versions
 
@@ -16,7 +16,7 @@ We take security vulnerabilities seriously. If you discover a security vulnerabi
 
 Instead, please report security vulnerabilities by emailing:
 
-**security@guit.example.com**
+**openlabs-oss@protonmail.com** â†’ **openlabs-oss@protonmail.com**
 
 Include the following information:
 - Description of the vulnerability
@@ -72,7 +72,7 @@ Include the following information:
 
 ## Reporting Non-Security Bugs
 
-For non-security bugs, please use the [GitHub issue tracker](https://github.com/guit/guit/issues).
+For non-security bugs, please use the [GitHub issue tracker](https://github.com/OpenLabs-OSS/guit/issues).
 
 ## Security Updates
 
@@ -82,7 +82,7 @@ Security updates will be released as patch versions (e.g., 0.1.1) and announced 
 
 ## Contact
 
-For security-related questions or concerns, contact: security@guit.example.com
+For security-related questions or concerns, contact: openlabs-oss@protonmail.com
 
 ## Acknowledgments
 

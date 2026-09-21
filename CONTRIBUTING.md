@@ -20,7 +20,7 @@ Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ```bash
 # Clone the repository
-git clone https://github.com/guit/guit.git
+git clone https://github.com/OpenLabs-OSS/guit.git
 cd guit
 
 # Configure

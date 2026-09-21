@@ -572,8 +572,19 @@ void MainWindow::onAdvancedToggled(bool advanced)
 
 void MainWindow::onAbout()
 {
-    QMessageBox::about(this, tr("About Guit"),
-                       tr("Guit — a beginner-friendly Git client that shows what Git is doing.\n\nMilestone 2 build: core Git workflows."));
+    QString version = QCoreApplication::applicationVersion();
+    QString description = tr("A modern graphical Git client that makes Git easier to understand and use without hiding the underlying Git workflow.");
+    QString message = tr("Guit %1\n\n%2\n\nPublisher: OpenLabs\nRepository: <a href=\"https://github.com/OpenLabs-OSS/guit\">https://github.com/OpenLabs-OSS/guit</a>")
+                          .arg(version)
+                          .arg(description);
+    
+    QMessageBox aboutBox(this);
+    aboutBox.setWindowTitle(tr("About Guit"));
+    aboutBox.setTextFormat(Qt::RichText);
+    aboutBox.setText(message);
+    aboutBox.setIconPixmap(QPixmap(":/assets/app_icon.png").scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    aboutBox.setStandardButtons(QMessageBox::Ok);
+    aboutBox.exec();
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

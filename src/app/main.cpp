@@ -24,9 +24,12 @@ int main(int argc, char *argv[])
     Guit::Logging::initialize(/*logToFile=*/true);
 
     QApplication app(argc, argv);
-    QCoreApplication::setOrganizationName(QStringLiteral("Guit"));
+    QCoreApplication::setOrganizationName(QStringLiteral("OpenLabs"));
     QCoreApplication::setApplicationName(QStringLiteral("Guit"));
     QCoreApplication::setApplicationVersion(QStringLiteral(GUIT_VERSION_STRING));
+    
+    // Set application icon
+    app.setWindowIcon(QIcon(":/assets/app_icon.png"));
 
     Guit::AppSettings settings;
     Guit::ThemeManager themes(&settings);

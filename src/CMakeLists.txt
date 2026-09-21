@@ -110,9 +110,11 @@ target_include_directories(guit_core PUBLIC
 )
 target_link_libraries(guit_core PUBLIC Qt6::Core Qt6::Widgets Qt6::Concurrent)
 
+qt6_add_resources(guit_core "resources.qrc")
+
 target_compile_options(guit_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra -Wpedantic>
 )
 
-add_executable(guit app/main.cpp)
+add_executable(guit app/main.cpp app/guit.rc)
 target_link_libraries(guit PRIVATE guit_core)

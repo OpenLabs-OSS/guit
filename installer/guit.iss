@@ -4,8 +4,11 @@
 
 #define AppName "Guit"
 #define AppVersion "0.1.0"
-#define AppPublisher "Guit Contributors"
-#define AppURL "https://github.com/guit/guit"
+#define AppPublisher "OpenLabs"
+#define AppURL "https://github.com/OpenLabs-OSS/guit"
+#define AppSupportURL "https://github.com/OpenLabs-OSS/guit/issues"
+#define AppUpdatesURL "https://github.com/OpenLabs-OSS/guit/releases"
+#define AppContact "openlabs-oss@protonmail.com"
 #define AppExeName "guit.exe"
 #define DeployDir "..\build-release\deploy"
 
@@ -15,8 +18,9 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppURL}
-AppSupportURL={#AppURL}
-AppUpdatesURL={#AppURL}
+AppSupportURL={#AppSupportURL}
+AppUpdatesURL={#AppUpdatesURL}
+AppContact={#AppContact}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
@@ -27,9 +31,8 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 UninstallDisplayIcon={app}\{#AppExeName}
-SetupIconFile={#DeployDir}\{#AppExeName}
-ArchitecturesInstallIn64BitMode=x64
-ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64os
+ArchitecturesAllowed=x64os
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -45,20 +48,20 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{commondesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName,&,&&)}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,Guit}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
 
 [UninstallRun]
-Filename: "{app}\unins000.exe"
+Filename: "{app}\unins000.exe"; RunOnceId: "guit_uninstall"
 
 [Registry]
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#AppExeName}"; ValueType: string; ValueData: "{app}\{#AppExeName}"; Flags: uninsdeletevalue
 
 [Messages]
 ; Custom messages for the installer
-ButtonText = {&Install}
+; (none)
 
 [Code]
 procedure CurStepChanged(CurStep: TSetupStep);
