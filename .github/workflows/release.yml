@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
 
+env:
+  QT_VERSION: 6.8.3
+
 jobs:
   release:
     name: Build and Release (Windows)
@@ -23,7 +26,7 @@ jobs:
       - name: Setup Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: 6.5.3
+          version: ${{ env.QT_VERSION }}
           host: windows
           target: desktop
           arch: win64_mingw
@@ -34,19 +37,22 @@ jobs:
         shell: pwsh
         run: |
           choco install ninja --version 1.12.1 --no-progress
-          "C:\Program Files\Ninja" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\Program Files\Ninja" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup CMake
         shell: pwsh
         run: |
           choco install cmake --version 3.28.1 --no-progress
-          "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\Program Files\CMake\bin" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Setup Git
         shell: pwsh
         run: |
           choco install git --version 2.45.0 --no-progress
-          "C:\Program Files\Git\cmd" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "C:\Program Files\Git\cmd" |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Configure
         shell: pwsh
@@ -70,7 +76,8 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
+          "version=$version" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Create Portable Package
         shell: pwsh
@@ -104,7 +111,9 @@ jobs:
           $zipHash  Guit-$version-windows-x64.zip
           $installerHash  Guit-$version-windows-x64-Setup.exe
           $exeHash  guit.exe
-          "@ | Out-File -FilePath build/SHA256SUMS.txt -Encoding utf8
+          "@ | Out-File `
+            -FilePath build/SHA256SUMS.txt `
+            -Encoding utf8
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
