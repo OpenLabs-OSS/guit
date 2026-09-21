@@ -1,17 +1,26 @@
 # Guit Release Workflow
+#
+# Runs when a version tag such as v0.1.0 is pushed.
+# Builds, tests, packages, checksums, and publishes the
+# official Windows x64 GitHub Release.
 
 name: Release
 
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
 
+env:
+  QT_VERSION: 6.5
+  MINGW_VERSION: 13.1
+
 jobs:
   release:
+    name: Build and Publish Release
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -24,7 +33,7 @@ jobs:
       - name: Setup Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: 6.5
+          version: ${{ env.QT_VERSION }}
           host: windows
           target: desktop
           arch: win64_mingw
@@ -34,7 +43,7 @@ jobs:
       - name: Setup MinGW
         uses: ilammy/setup-mingw@v2
         with:
-          version: 13.1
+          version: ${{ env.MINGW_VERSION }}
           threads: posix
           exception: seh
 
@@ -48,16 +57,22 @@ jobs:
           choco install cmake --version 3.28.1 --no-progress
           echo "C:\Program Files\CMake\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
-      - name: Setup Git
+      - name: Determine Version
+        id: version
+        shell: pwsh
         run: |
-          choco install git --version 2.45.0 --no-progress
-          echo "C:\Program Files\Git\cmd" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Configure
-        run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1310_64/bin/g++.exe \
-            -DCMAKE_PREFIX_PATH=C:/Qt/6.5/mingw_64
+        run: >
+          cmake
+          -S .
+          -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1310_64/bin/g++.exe
+          -DCMAKE_PREFIX_PATH=C:/Qt/6.5/mingw_64
 
       - name: Build
         run: cmake --build build --config Release
@@ -69,65 +84,101 @@ jobs:
         run: cmake --build build --target deploy
 
       - name: Create Portable Package
+        shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
-          Compress-Archive -Path build/deploy/* -DestinationPath "build/Guit-${version}-windows-x64.zip" -Force
+          $version = "${{ steps.version.outputs.version }}"
+          $zipPath = "build/Guit-$version-windows-x64.zip"
+
+          Compress-Archive `
+            -Path "build/deploy/*" `
+            -DestinationPath $zipPath `
+            -Force
 
       - name: Build Installer
         run: cmake --build build --target installer
 
-      - name: Generate Checksums
+      - name: Verify Release Artifacts
+        shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart('v')
-          $zipHash = Get-FileHash -Algorithm SHA256 "build/Guit-${version}-windows-x64.zip"
-          $exeHash = Get-FileHash -Algorithm SHA256 "build/deploy/guit.exe"
-          $installerHash = Get-FileHash -Algorithm SHA256 "build/installer/Guit-${version}-windows-x64-Setup.exe"
+          $version = "${{ steps.version.outputs.version }}"
+
+          $zip = "build/Guit-$version-windows-x64.zip"
+          $installer = "build/installer/Guit-$version-windows-x64-Setup.exe"
+
+          if (-not (Test-Path $zip)) {
+            throw "Portable package was not created: $zip"
+          }
+
+          if (-not (Test-Path $installer)) {
+            throw "Installer was not created: $installer"
+          }
+
+          Write-Host "Portable package:"
+          Get-Item $zip | Select-Object FullName, Length
+
+          Write-Host "Installer:"
+          Get-Item $installer | Select-Object FullName, Length
+
+      - name: Generate SHA-256 Checksums
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+
+          $zipPath = "build/Guit-$version-windows-x64.zip"
+          $installerPath = "build/installer/Guit-$version-windows-x64-Setup.exe"
+
+          $zipHash = (Get-FileHash -Algorithm SHA256 $zipPath).Hash.ToLower()
+          $installerHash = (Get-FileHash -Algorithm SHA256 $installerPath).Hash.ToLower()
+
+          $zipName = Split-Path $zipPath -Leaf
+          $installerName = Split-Path $installerPath -Leaf
+
           @"
-          # SHA256 Checksums for Guit $version Release Artifacts
+          $installerHash  $installerName
+          $zipHash  $zipName
+          "@ | Set-Content -Path "build/SHA256SUMS.txt" -Encoding utf8
 
-          ## Portable Package
-          SHA256(Guit-$version-windows-x64.zip) = $($zipHash.Hash)
+          Write-Host "SHA-256 checksums:"
+          Get-Content "build/SHA256SUMS.txt"
 
-          ## Deployed Executable
-          SHA256(guit.exe) = $($exeHash.Hash)
-
-          ## Installer
-          SHA256(Guit-$version-windows-x64-Setup.exe) = $($installerHash.Hash)
-          "@ | Out-File -FilePath build/checksums.txt -Encoding utf8
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
           name: Guit ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+
           body: |
             ## Guit ${{ github.ref_name }}
 
-            ### Changes
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+            A modern graphical Git client that makes Git easier to understand and use without hiding the underlying Git workflow.
 
             ### Downloads
-            - [Portable Package (Windows x64)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Guit-${{ github.ref_name }}-windows-x64.zip)
-            - [Installer (Windows x64)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Guit-${{ github.ref_name }}-windows-x64-Setup.exe)
+
+            - **Windows x64 Installer** — `Guit-${{ steps.version.outputs.version }}-windows-x64-Setup.exe`
+            - **Windows x64 Portable** — `Guit-${{ steps.version.outputs.version }}-windows-x64.zip`
 
             ### Verification
-            ```text
-            SHA256(Guit-${{ github.ref_name }}.zip) = <from checksums.txt>
-            SHA256(guit.exe) = <from checksums.txt>
-            SHA256(Guit-${{ github.ref_name }}-Setup.exe) = <from checksums.txt>
+
+            SHA-256 checksums for the installer and portable package are provided in `SHA256SUMS.txt`.
+
+            On Windows, you can verify a file with:
+
+            ```powershell
+            Get-FileHash .\Guit-${{ steps.version.outputs.version }}-windows-x64-Setup.exe -Algorithm SHA256
             ```
 
             ### Requirements
-            - Windows 10/11
-            - Git for Windows (installed separately)
 
-          draft: false
-          prerelease: false
+            - Windows 10 or Windows 11
+            - Git for Windows installed separately
+
           files: |
-            build/Guit-*-windows-x64.zip
-            build/installer/Guit-*-windows-x64-Setup.exe
-            build/checksums.txt
-            build/deploy/guit.exe
-          generate_release_notes: true
+            build/Guit-${{ steps.version.outputs.version }}-windows-x64.zip
+            build/installer/Guit-${{ steps.version.outputs.version }}-windows-x64-Setup.exe
+            build/SHA256SUMS.txt
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
