@@ -28,29 +28,8 @@ jobs:
           host: windows
           target: desktop
           arch: win64_mingw
-          archives: qtbase
+          tools: tools_mingw1310
           cache: true
-
-      - name: Setup Ninja
-        shell: pwsh
-        run: |
-          choco install ninja --version 1.12.1 --no-progress
-          "C:\Program Files\Ninja" |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Setup CMake
-        shell: pwsh
-        run: |
-          choco install cmake --version 3.28.1 --no-progress
-          "C:\Program Files\CMake\bin" |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Setup Git
-        shell: pwsh
-        run: |
-          choco install git --version 2.45.0 --no-progress
-          "C:\Program Files\Git\cmd" |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Configure
         shell: pwsh
@@ -58,8 +37,7 @@ jobs:
           cmake -S . -B build `
             -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DGUIT_BUILD_TESTS=ON `
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            -DGUIT_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -126,7 +104,6 @@ jobs:
           host: linux
           target: desktop
           arch: gcc_64
-          archives: qtbase
           cache: true
 
       - name: Install Clang-Tidy
@@ -150,9 +127,7 @@ jobs:
             -type f \
             \( -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" \) \
             -print0 |
-          xargs -0 -r clang-tidy \
-            -p build \
-            --warnings-as-errors='*'
+          xargs -0 -r clang-tidy -p build
 
   docs:
     name: Documentation

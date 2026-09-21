@@ -30,29 +30,8 @@ jobs:
           host: windows
           target: desktop
           arch: win64_mingw
-          archives: qtbase
+          tools: tools_mingw1310
           cache: true
-
-      - name: Setup Ninja
-        shell: pwsh
-        run: |
-          choco install ninja --version 1.12.1 --no-progress
-          "C:\Program Files\Ninja" |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Setup CMake
-        shell: pwsh
-        run: |
-          choco install cmake --version 3.28.1 --no-progress
-          "C:\Program Files\CMake\bin" |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-
-      - name: Setup Git
-        shell: pwsh
-        run: |
-          choco install git --version 2.45.0 --no-progress
-          "C:\Program Files\Git\cmd" |
-            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Configure
         shell: pwsh
@@ -123,6 +102,7 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
+
           body: |
             ## Guit ${{ github.ref_name }}
 
@@ -144,9 +124,11 @@ jobs:
             SHA-256 checksums are provided in `SHA256SUMS.txt`.
 
             See the full changelog in [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md).
+
           files: |
             build/Guit-*-windows-x64.zip
             build/installer/Guit-*-windows-x64-Setup.exe
             build/SHA256SUMS.txt
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
