@@ -131,7 +131,7 @@ Git: git switch -c feature/login
 
 ## License
 
-MIT License - see LICENSE file for details.
+GPL License - see [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
