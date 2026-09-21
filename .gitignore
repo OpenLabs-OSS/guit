@@ -4,6 +4,7 @@ build/
 out/
 cmake-build-*/
 build-release/
+buildM5/
 
 # Compiled binaries
 
@@ -59,3 +60,6 @@ Thumbs.db
 # Logs
 
 *.log
+
+# Assets
+assets/*.png
