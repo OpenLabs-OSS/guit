@@ -103,30 +103,63 @@ jobs:
           version: ${{ env.QT_VERSION }}
           host: linux
           target: desktop
-          arch: gcc_64
+          arch: linux_gcc_64
           cache: true
 
       - name: Install Clang-Tidy
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-tidy
+          sudo apt-get install -y clang-tidy ninja-build
+
+      - name: Verify Qt and Tools
+        run: |
+          echo "Qt installation:"
+          find "$HOME/work/guit/Qt" -maxdepth 3 -type f -name "qmake" -o -name "qtpaths" 2>/dev/null | head -20 || true
+
+          echo
+          echo "CMake:"
+          cmake --version
+
+          echo
+          echo "Ninja:"
+          ninja --version
+
+          echo
+          echo "Clang-Tidy:"
+          clang-tidy --version
 
       - name: Configure
         run: |
           cmake -S . -B build \
+            -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DGUIT_BUILD_TESTS=OFF \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
+      - name: Verify Compilation Database
+        run: |
+          test -f build/compile_commands.json
+          echo "compile_commands.json generated successfully."
+
       - name: Run Clang-Tidy
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
-          find src tools \
-            -type f \
-            \( -name "*.cpp" -o -name "*.cc" -o -name "*.cxx" \) \
-            -print0 |
+          git ls-files \
+            'src/*.cpp' \
+            'src/**/*.cpp' \
+            'src/*.cc' \
+            'src/**/*.cc' \
+            'src/*.cxx' \
+            'src/**/*.cxx' \
+            'tools/*.cpp' \
+            'tools/**/*.cpp' \
+            'tools/*.cc' \
+            'tools/**/*.cc' \
+            'tools/*.cxx' \
+            'tools/**/*.cxx' \
+            -z |
           xargs -0 -r clang-tidy -p build
 
   docs:
