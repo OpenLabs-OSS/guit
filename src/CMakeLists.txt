@@ -116,5 +116,5 @@ target_compile_options(guit_core PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra -Wpedantic>
 )
 
-add_executable(guit app/main.cpp app/guit.rc)
+add_executable(guit WIN32 app/main.cpp app/guit.rc)
 target_link_libraries(guit PRIVATE guit_core)
