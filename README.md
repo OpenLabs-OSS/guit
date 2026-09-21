@@ -25,7 +25,9 @@ Guit makes Git easier to use and understand **without hiding Git itself**. For i
 
 ## Screenshots
 
-*(Screenshots to be added)*
+| Light Theme | Dark Theme |
+|-------------|------------|
+| ![Light](assets/screenshots/light.png) | ![Dark](assets/screenshots/dark.png) |
 
 ## Requirements
 
