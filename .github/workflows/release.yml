@@ -1,8 +1,4 @@
 # Guit Release Workflow
-#
-# Runs when a version tag such as v0.1.0 is pushed.
-# Builds, tests, packages, checksums, and publishes the
-# official Windows x64 GitHub Release.
 
 name: Release
 
@@ -16,7 +12,6 @@ permissions:
 
 env:
   QT_VERSION: 6.5
-  MINGW_VERSION: 13.1
 
 jobs:
   release:
@@ -39,13 +34,6 @@ jobs:
           arch: win64_mingw
           modules: qtbase qtsvg qttools
           cache: true
-
-      - name: Setup MinGW
-        uses: ilammy/setup-mingw@v2
-        with:
-          version: ${{ env.MINGW_VERSION }}
-          threads: posix
-          exception: seh
 
       - name: Setup Ninja
         run: |
@@ -164,7 +152,7 @@ jobs:
 
             SHA-256 checksums for the installer and portable package are provided in `SHA256SUMS.txt`.
 
-            On Windows, you can verify a file with:
+            On Windows, you can verify a downloaded file with:
 
             ```powershell
             Get-FileHash .\Guit-${{ steps.version.outputs.version }}-windows-x64-Setup.exe -Algorithm SHA256
