@@ -16,7 +16,7 @@ We take security vulnerabilities seriously. If you discover a security vulnerabi
 
 Instead, please report security vulnerabilities by emailing:
 
-**openlabs-oss@protonmail.com** â†’ **openlabs-oss@protonmail.com**
+**openlabs-oss@protonmail.com**
 
 Include the following information:
 - Description of the vulnerability
